@@ -1,0 +1,17 @@
+.DS_Store
+.prospec/
+.claude/
+.venv/
+.env
+node_modules/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+alembic/versions/*.pyc

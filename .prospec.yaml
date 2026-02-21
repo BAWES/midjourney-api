@@ -1,0 +1,18 @@
+version: "1.0"
+project:
+  name: midjourney-api
+tech_stack:
+  language: javascript
+  package_manager: pnpm
+paths:
+  base_dir: prospec
+exclude:
+  - "*.env*"
+  - "*credential*"
+  - "*secret*"
+  - node_modules
+  - .git
+agents:
+  - claude
+knowledge:
+  base_path: prospec/ai-knowledge
