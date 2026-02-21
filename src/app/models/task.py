@@ -54,6 +54,8 @@ class UsageLog(TimestampMixin, Base):
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    task: Mapped["Task"] = relationship(back_populates="usage_log")
+
 
 # Avoid circular import
 from app.models.api_key import ApiKey  # noqa: E402, F401
