@@ -58,13 +58,31 @@
 
 ---
 
+### 6. Test-Driven Development (TDD)
+
+**Description**: Write tests before implementation. Follow the Red-Green-Refactor cycle for all new features and bug fixes.
+
+**Rationale**: TDD ensures specification compliance, prevents regressions, and produces testable designs.
+
+**Enforcement**: Each implementation task must have corresponding tests written first; CI must pass before merge.
+
+### 7. Atomic Commits
+
+**Description**: Each commit must represent a single logical change. Group related files together; never mix unrelated changes.
+
+**Rationale**: Atomic commits enable clean git history, easy bisect, and safe rollbacks.
+
+**Enforcement**: Commit after completing each task or logical group; use conventional commit format (feat/fix/test/chore).
+
+---
+
 ## Quality Standards
 
-- **Testing**: All public functions must have unit tests; 80%+ coverage target
+- **Testing**: All public functions must have unit tests; 80%+ coverage target; TDD workflow (test first)
 - **Documentation**: All API endpoints auto-documented via FastAPI/OpenAPI
 - **Performance**: API response time < 200ms for non-MJ endpoints (p95)
 - **Security**: API keys stored hashed; no secrets in code or logs
 
 ---
 
-> Last updated: 2026-02-21
+> Last updated: 2026-02-22
