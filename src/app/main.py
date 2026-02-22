@@ -14,17 +14,52 @@ from app.middleware.correlation_id import CorrelationIdMiddleware
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     import asyncio
+    import logging
 
     from app.api.v1.imagine import set_dependencies
+    from app.core.concurrency import ConcurrencyLimiter
+    from app.database import async_session
     from app.providers.discord.correlation import CorrelationManager
 
+    log = logging.getLogger(__name__)
     setup_logging()
 
     dispatch_queue: asyncio.Queue = asyncio.Queue()
     correlation = CorrelationManager()
     set_dependencies(dispatch_queue, correlation)
 
+    # Choose provider based on config
+    if settings.discord_bot_token and settings.discord_user_token:
+        from app.providers.discord.client import DiscordMidjourneyClient
+
+        mj_client = DiscordMidjourneyClient(
+            bot_token=settings.discord_bot_token,
+            user_token=settings.discord_user_token,
+            channel_id=settings.mj_channel_id,
+        )
+        log.info("Using DiscordMidjourneyClient")
+    else:
+        from app.providers.mock.client import MockMidjourneyClient
+
+        mj_client = MockMidjourneyClient(delay=2.0)
+        log.info("Discord tokens not configured — using MockMidjourneyClient")
+
+    limiter = ConcurrencyLimiter(
+        session_factory=async_session,
+        mj_client=mj_client,
+        correlation=correlation,
+        dispatch_queue=dispatch_queue,
+        max_concurrent=settings.mj_max_concurrent_jobs,
+        timeout_seconds=settings.mj_task_timeout_seconds,
+    )
+
+    await mj_client.start()
+    await limiter.start()
+
     yield
+
+    await limiter.stop()
+    await mj_client.stop()
     await engine.dispose()
 
 
