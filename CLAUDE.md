@@ -2,6 +2,14 @@
 
 > AI-augmented project with Prospec Skills and structured AI Knowledge
 
+## 語言規定
+
+- **AI 回應語言**：繁體中文
+- **Commit message**：英文，conventional commits 格式
+- **程式碼命名**：英文
+- **程式碼註解**：英文
+- **文件（.md）**：繁體中文
+
 ## Tech Stack
 
 - **Language**: Python
@@ -99,17 +107,82 @@
 **Type**: Lifecycle
 **References**: `.prospec/skills/prospec-knowledge-update/references/`
 
+## Available Prospec Skills
 
-## Working with This Project
+透過 `/skill-name` 觸發專用工作流程：
 
-1. **開始前**: 閱讀 Constitution 了解專案原則
-2. **理解結構**: 查閱 AI Knowledge Index 掌握模組架構
-3. **程式碼規範**: 遵循 Conventions 文件中的風格指南
-4. **使用 Skills**: 透過 `/skill-name` 指令觸發專用工作流程
-5. **模組依賴**: 修改前檢查 `prospec/ai-knowledge/module-map.yaml`
+| Skill | 用途 | 類型 |
+|-------|------|------|
+| `/prospec-explore` | 釐清需求、調查問題、比較方案 | Lifecycle |
+| `/prospec-new-story` | 建立新的變更需求 | Planning |
+| `/prospec-plan` | 生成實作計劃 | Planning |
+| `/prospec-design` | 視覺與互動規格 | Planning |
+| `/prospec-tasks` | 拆分為可執行任務清單 | Planning |
+| `/prospec-ff` | 快速前進（story → plan → tasks 一次完成） | Planning |
+| `/prospec-implement` | 按 tasks.md 逐項實作 | Execution |
+| `/prospec-verify` | 驗證實作符合規格 | Execution |
+| `/prospec-knowledge-generate` | 生成模組 AI Knowledge | Lifecycle |
+| `/prospec-knowledge-update` | 增量更新 AI Knowledge | Lifecycle |
+| `/prospec-archive` | 歸檔已完成的變更 | Lifecycle |
 
-## Notes
+## 知識分層載入（Critical）
 
-- 此檔案為 Layer 0 (always loaded) - 保持簡潔，指向其他資源
-- Skills 為 Layer 1-2 - 按需載入詳細指令
-- Knowledge Base 為 on-demand - 根據工作範圍載入
+本專案採用**漸進式知識載入**，避免一次讀取所有文件造成 context window 浪費。AI Agent **必須**按層次讀取：
+
+```
+Layer 0 ─ CLAUDE.md（本檔案）
+  │       Always loaded，提供全局方向與入口指引
+  │       ⚠️ 不要在這層做任何實作決策
+  │
+  ├─ Layer 1 ─ 按需載入，每次任務開始前讀取
+  │   │
+  │   ├─ prospec/CONSTITUTION.md        ← 原則與硬約束
+  │   │   何時讀：每次 session 開始、做架構決策前、code review 時
+  │   │   為什麼：確保不違反專案原則（如 Local-First、TDD、Atomic Commit）
+  │   │
+  │   └─ prospec/ai-knowledge/_index.md ← 模組索引
+  │       何時讀：需要了解專案結構、模組依賴關係時
+  │       為什麼：快速定位要修改的模組，避免改錯地方
+  │
+  └─ Layer 2 ─ 按工作範圍載入，只讀需要的部分
+      │
+      ├─ prospec/ai-knowledge/modules/<name>/README.md  ← 特定模組詳情
+      │   何時讀：實際修改該模組的程式碼時
+      │   為什麼：了解模組的 API、內部結構、測試方式
+      │
+      ├─ prospec/ai-knowledge/_conventions.md            ← 程式碼慣例
+      │   何時讀：寫新程式碼或 code review 時
+      │   為什麼：確保命名、pattern、錯誤處理風格一致
+      │
+      ├─ docs/requirements.md                            ← 需求規格
+      │   何時讀：確認功能範圍、驗證實作是否符合需求時
+      │   為什麼：避免實作 Phase 2/3 的功能或遺漏 Phase 1 需求
+      │
+      └─ docs/plans/*.md                                 ← 設計與實作計劃
+          何時讀：開始實作特定 Task 時
+          為什麼：取得該 Task 的完整步驟與預期程式碼
+```
+
+### 載入規則
+
+1. **每次新 session 開始**：讀 CLAUDE.md（自動）→ 讀 Constitution → 讀 _index.md
+2. **開始實作任務前**：讀該任務涉及的模組 README + _conventions.md
+3. **做架構或設計決策前**：重讀 Constitution 的相關原則
+4. **禁止一次全讀**：不要在 session 開始時把所有 Layer 2 文件都讀進來，浪費 context window
+5. **修改多個模組時**：逐一讀取涉及的模組 README，不要一次全部載入
+
+### 為什麼這很重要
+
+- Claude Code 的 context window 有限，全部載入會擠壓實際工作空間
+- 漸進式載入確保每次讀取的都是**當下需要的**知識
+- Constitution 必須頻繁重讀，因為它定義了不可違反的硬約束
+
+## 注意事項
+
+- 此檔案為 Layer 0（always loaded），保持簡潔，詳細資訊指向其他文件
+- 修改架構前必須先讀 Constitution
+- 新增功能前必須先讀 requirements.md 確認是否在 Phase 1 MVP 範圍內
+- Phase 2/3 功能不在當前實作範圍，不得提前引入
+
+## 主動技
+為了確保你有讀到這個檔案，每次執行任務時開頭都說「記せ、規典」（始解）

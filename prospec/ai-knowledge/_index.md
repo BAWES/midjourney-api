@@ -7,8 +7,15 @@
 
 <!-- prospec:auto-start -->
 
-| Module | Keywords | Status | Description | Depends On |
-|--------|----------|--------|-------------|------------|
+| Module | Keywords | Status | Description | Files | Depends On |
+|--------|----------|--------|-------------|-------|------------|
+| api | endpoints, routes, auth, REST, FastAPI | Active | HTTP API layer — routers, dependency injection, request/response | readme, api-surface, dependencies, patterns, endpoints | models, services, providers-discord, infra |
+| models | ORM, schema, database, Pydantic, SQLAlchemy | Active | Data layer — SQLAlchemy models, Pydantic schemas, enums | readme, api-surface, dependencies, patterns | — |
+| services | business-logic, quota, task, usage, orchestration | Active | Business logic — imagine workflow, state machine, quota enforcement | readme, api-surface, dependencies, patterns | models, providers-discord, infra |
+| providers-discord | Discord, gateway, interaction, correlation, parser | Active | Discord provider — /imagine commands, WebSocket monitoring, tag correlation | readme, api-surface, dependencies, patterns | — |
+| providers-mock | mock, testing, simulation | Active | Mock provider — simulated MJ generation for testing without Discord | readme, api-surface, dependencies, patterns | — |
+| core | concurrency, semaphore, dispatch, timeout, recovery | Active | Core orchestration — concurrency limiter, dispatch loop, timeout management | readme, api-surface, dependencies, patterns | models, services, providers-discord |
+| infra | config, database, logging, FastAPI, lifespan | Active | Infrastructure — configuration, DB, logging, app bootstrap | readme, api-surface, dependencies, patterns | api, core, providers-discord, providers-mock, models |
 
 <!-- prospec:auto-end -->
 
