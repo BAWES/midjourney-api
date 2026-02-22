@@ -21,8 +21,9 @@ class DiscordMidjourneyClient:
         bot_token: str,
         user_token: str,
         channel_id: str,
+        correlation: CorrelationManager | None = None,
     ) -> None:
-        self._correlation = CorrelationManager()
+        self._correlation = correlation or CorrelationManager()
         self._interaction = InteractionClient(
             user_token=user_token,
             channel_id=channel_id,

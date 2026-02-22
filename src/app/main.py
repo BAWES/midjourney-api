@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             bot_token=settings.discord_bot_token,
             user_token=settings.discord_user_token,
             channel_id=settings.mj_channel_id,
+            correlation=correlation,
         )
         log.info("Using DiscordMidjourneyClient")
     else:

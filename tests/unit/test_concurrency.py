@@ -68,7 +68,9 @@ class TestConcurrencyLimiterDispatch:
         await limiter.dispatch_one(task_id)
 
         call_args = mock_client.imagine.call_args
-        assert tag in call_args.kwargs.get("prompt", call_args.args[0] if call_args.args else "")
+        # Tag embedding is now handled by the MJ client, not the limiter
+        assert call_args.kwargs.get("prompt") == "a beautiful cat"
+        assert call_args.kwargs.get("correlation_tag") == tag
 
     async def test_dispatch_failure_marks_failed(
         self, session_factory: async_sessionmaker, db: AsyncSession, api_key: ApiKey
@@ -120,7 +122,7 @@ class TestConcurrencyLimiterCallbacks:
             correlation=correlation,
             dispatch_queue=queue,
         )
-        await limiter.on_complete(tag, "https://cdn.example.com/image.png")
+        await limiter.on_complete(correlation_tag=tag, image_url="https://cdn.example.com/image.png")
 
         db.expire_all()
         refreshed = await task_svc.get_task_by_id(task_id)
@@ -149,7 +151,7 @@ class TestConcurrencyLimiterCallbacks:
             correlation=correlation,
             dispatch_queue=queue,
         )
-        await limiter.on_complete(tag, "https://cdn.example.com/image.png")
+        await limiter.on_complete(correlation_tag=tag, image_url="https://cdn.example.com/image.png")
 
         db.expire_all()
         usage_svc = UsageService(db)
@@ -178,7 +180,7 @@ class TestConcurrencyLimiterCallbacks:
             correlation=correlation,
             dispatch_queue=queue,
         )
-        await limiter.on_error(tag, "Generation failed")
+        await limiter.on_error(correlation_tag=tag, error_message="Generation failed")
 
         db.expire_all()
         refreshed = await task_svc.get_task_by_id(task_id)
@@ -205,7 +207,7 @@ class TestConcurrencyLimiterCallbacks:
             correlation=correlation,
             dispatch_queue=queue,
         )
-        await limiter.on_progress(tag, 50)
+        await limiter.on_progress(correlation_tag=tag, progress=50)
 
         db.expire_all()
         refreshed = await task_svc.get_task_by_id(task_id)

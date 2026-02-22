@@ -81,11 +81,8 @@ class ConcurrencyLimiter:
                 task = await task_svc.get_task_by_id(task_id)
                 await task_svc.transition(task_id, TaskStatus.PROCESSING)
 
-                tagged_prompt = self._correlation.embed_in_prompt(
-                    task.prompt, task.correlation_tag
-                )
                 await self._mj_client.imagine(
-                    prompt=tagged_prompt,
+                    prompt=task.prompt,
                     aspect_ratio=task.aspect_ratio,
                     correlation_tag=task.correlation_tag,
                 )
@@ -97,7 +94,8 @@ class ConcurrencyLimiter:
                     pass
                 self._semaphore.release()
 
-    async def on_progress(self, tag: str, progress: int) -> None:
+    async def on_progress(self, correlation_tag: str, progress: int, **kwargs: object) -> None:
+        tag = correlation_tag
         task_id_str = self._correlation.lookup(tag)
         if not task_id_str:
             return
@@ -105,7 +103,8 @@ class ConcurrencyLimiter:
             task_svc = TaskService(db)
             await task_svc.update_progress(uuid.UUID(task_id_str), progress)
 
-    async def on_complete(self, tag: str, image_url: str) -> None:
+    async def on_complete(self, correlation_tag: str, image_url: str, **kwargs: object) -> None:
+        tag = correlation_tag
         task_id_str = self._correlation.lookup(tag)
         if not task_id_str:
             return
@@ -119,7 +118,8 @@ class ConcurrencyLimiter:
         self._correlation.unregister(tag)
         self._semaphore.release()
 
-    async def on_error(self, tag: str, error_message: str) -> None:
+    async def on_error(self, correlation_tag: str, error_message: str, **kwargs: object) -> None:
+        tag = correlation_tag
         task_id_str = self._correlation.lookup(tag)
         if not task_id_str:
             return
