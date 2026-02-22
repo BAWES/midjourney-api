@@ -13,7 +13,17 @@ from app.middleware.correlation_id import CorrelationIdMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    import asyncio
+
+    from app.api.v1.imagine import set_dependencies
+    from app.providers.discord.correlation import CorrelationManager
+
     setup_logging()
+
+    dispatch_queue: asyncio.Queue = asyncio.Queue()
+    correlation = CorrelationManager()
+    set_dependencies(dispatch_queue, correlation)
+
     yield
     await engine.dispose()
 
