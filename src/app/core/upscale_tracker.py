@@ -71,5 +71,9 @@ class UpscaleTracker:
     def get(self, task_id: str) -> UpscaleState | None:
         return self._states.get(task_id)
 
+    def pop(self, task_id: str) -> UpscaleState | None:
+        """Atomically remove and return state. Prevents double finalization."""
+        return self._states.pop(task_id, None)
+
     def remove(self, task_id: str) -> None:
         self._states.pop(task_id, None)

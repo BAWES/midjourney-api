@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.upscale_tracker import UpscaleTracker
@@ -79,7 +79,6 @@ class ConcurrencyLimiter:
             await self.dispatch_one(task_id)
         except Exception:
             logger.exception("Dispatch failed for task %s", task_id)
-            # Semaphore released here only — dispatch_one never releases on error
             self._semaphore.release()
 
     async def dispatch_one(self, task_id: uuid.UUID) -> None:
@@ -102,14 +101,16 @@ class ConcurrencyLimiter:
                     logger.exception(
                         "Failed to transition task %s to FAILED", task_id
                     )
-                raise  # Re-raise so _dispatch_wrapper handles semaphore
+                raise
 
     async def on_progress(self, correlation_tag: str, progress: int, **kwargs: object) -> None:
         tag = correlation_tag
         task_id_str = self._correlation.lookup(tag)
         if not task_id_str:
             return
-        # Skip standard progress updates during UPSCALING phase
+        # Fast path: if tracker has this task, it's in UPSCALING phase — skip DB query
+        if self._upscale_tracker.get(task_id_str) is not None:
+            return
         async with self._session_factory() as db:
             task_svc = TaskService(db)
             task = await task_svc.get_task_by_id(uuid.UUID(task_id_str))
@@ -150,12 +151,9 @@ class ConcurrencyLimiter:
 
         async with self._session_factory() as db:
             task_svc = TaskService(db)
-            # Save grid image URL
             await task_svc.update_image_url(task_id, image_url)
-            # Get task to read upscale_count
             task = await task_svc.get_task_by_id(task_id)
             upscale_count = task.upscale_count
-            # Transition to UPSCALING
             await task_svc.transition(task_id, TaskStatus.UPSCALING)
 
         # Register tracker before sending interactions (avoid race condition)
@@ -177,6 +175,9 @@ class ConcurrencyLimiter:
                 except Exception:
                     logger.exception("Failed to send upscale U%d for task %s", i, task_id_str)
                     self._upscale_tracker.record_error(task_id_str, i, f"Failed to send U{i}")
+            else:
+                logger.warning("Missing upscale button U%d for task %s", i, task_id_str)
+                self._upscale_tracker.record_error(task_id_str, i, f"Button U{i} not found")
 
         # Check if all upscales already failed during send
         state = self._upscale_tracker.get(task_id_str)
@@ -198,7 +199,7 @@ class ConcurrencyLimiter:
 
         state = self._upscale_tracker.record_result(task_id_str, upscale_index, image_url)
         if state is None:
-            logger.warning("Upscale result for unknown task %s", task_id_str)
+            logger.warning("Upscale result for unknown task %s (already finalized?)", task_id_str)
             return
 
         # Update progress based on completed count
@@ -211,8 +212,12 @@ class ConcurrencyLimiter:
             await self._finalize_upscale(tag, task_id_str)
 
     async def _finalize_upscale(self, tag: str, task_id_str: str) -> None:
-        """Complete the upscale phase: save URLs, transition, release semaphore."""
-        state = self._upscale_tracker.get(task_id_str)
+        """Complete the upscale phase: save URLs, transition, release semaphore.
+
+        Uses atomic pop() to prevent double finalization from concurrent paths.
+        """
+        # Atomic pop — only one caller gets the state
+        state = self._upscale_tracker.pop(task_id_str)
         if state is None:
             return
 
@@ -236,7 +241,6 @@ class ConcurrencyLimiter:
 
             await usage_svc.create_log(task=task, api_key_id=task.api_key_id)
 
-        self._upscale_tracker.remove(task_id_str)
         self._correlation.unregister(tag)
         self._semaphore.release()
 
@@ -246,6 +250,8 @@ class ConcurrencyLimiter:
         if not task_id_str:
             return
         task_id = uuid.UUID(task_id_str)
+        # Clean up any in-flight upscale state to prevent late callbacks
+        self._upscale_tracker.remove(task_id_str)
         async with self._session_factory() as db:
             task_svc = TaskService(db)
             task = await task_svc.get_task_by_id(task_id)
@@ -283,12 +289,15 @@ class ConcurrencyLimiter:
                 )
             )
             for task in result.scalars().all():
-                task.error_message = f"Task timed out after {self._timeout}s"
-                await db.commit()
-                await task_svc.transition(task.id, TaskStatus.FAILED)
-                if task.correlation_tag:
-                    self._correlation.unregister(task.correlation_tag)
-                self._semaphore.release()
+                try:
+                    task.error_message = f"Task timed out after {self._timeout}s"
+                    await db.commit()
+                    await task_svc.transition(task.id, TaskStatus.FAILED)
+                    if task.correlation_tag:
+                        self._correlation.unregister(task.correlation_tag)
+                    self._semaphore.release()
+                except Exception:
+                    logger.exception("Failed to timeout PROCESSING task %s", task.id)
 
             # Query 2: UPSCALING tasks with upscale timeout
             upscale_cutoff = now - timedelta(seconds=self._upscale_timeout)
@@ -299,19 +308,24 @@ class ConcurrencyLimiter:
                 )
             )
             for task in result.scalars().all():
-                task_id_str = str(task.id)
-                # Preserve any collected URLs before cleanup
-                state = self._upscale_tracker.get(task_id_str)
-                if state and state.get_image_urls():
-                    task.image_urls = state.get_image_urls()
+                try:
+                    task_id_str = str(task.id)
+                    # Atomic pop to prevent race with on_upscale_result
+                    state = self._upscale_tracker.pop(task_id_str)
+                    if state is None:
+                        # Already finalized by another path — skip
+                        continue
+                    if state.get_image_urls():
+                        task.image_urls = state.get_image_urls()
 
-                task.error_message = f"Upscale timed out after {self._upscale_timeout}s"
-                await db.commit()
-                await task_svc.transition(task.id, TaskStatus.FAILED)
-                self._upscale_tracker.remove(task_id_str)
-                if task.correlation_tag:
-                    self._correlation.unregister(task.correlation_tag)
-                self._semaphore.release()
+                    task.error_message = f"Upscale timed out after {self._upscale_timeout}s"
+                    await db.commit()
+                    await task_svc.transition(task.id, TaskStatus.FAILED)
+                    if task.correlation_tag:
+                        self._correlation.unregister(task.correlation_tag)
+                    self._semaphore.release()
+                except Exception:
+                    logger.exception("Failed to timeout UPSCALING task %s", task.id)
 
     async def recover(self) -> None:
         """Rebuild semaphore and correlation map from active tasks."""

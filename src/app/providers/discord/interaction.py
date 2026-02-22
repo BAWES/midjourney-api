@@ -4,6 +4,7 @@ Extracted from POC 2 patterns: guild command index lookup, interaction
 payload construction, and anti-detection delays.
 """
 
+import asyncio
 import random
 import time
 
@@ -69,7 +70,6 @@ class InteractionClient:
 
         # Anti-detection random delay
         delay = random.uniform(1.0, 3.0)
-        import asyncio
         await asyncio.sleep(delay)
 
         payload = {

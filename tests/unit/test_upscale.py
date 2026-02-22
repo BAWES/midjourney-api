@@ -204,6 +204,19 @@ class TestUpscaleTracker:
         tracker.remove("task-1")
         assert tracker.get("task-1") is None
 
+    def test_pop_returns_state_and_removes(self) -> None:
+        tracker = UpscaleTracker()
+        tracker.start("task-1", 1, "grid.png", "msg-1", {1: "id1"})
+        state = tracker.pop("task-1")
+        assert state is not None
+        assert state.task_id == "task-1"
+        # Second pop returns None (idempotent)
+        assert tracker.pop("task-1") is None
+
+    def test_pop_unknown_returns_none(self) -> None:
+        tracker = UpscaleTracker()
+        assert tracker.pop("unknown") is None
+
     def test_duplicate_result_ignored(self) -> None:
         tracker = UpscaleTracker()
         tracker.start("task-1", 1, "grid.png", "msg-1", {1: "id1"})
