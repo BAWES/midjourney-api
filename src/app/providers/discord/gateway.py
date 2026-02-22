@@ -9,7 +9,14 @@ from collections.abc import Callable, Coroutine
 
 import discord
 
-from app.providers.discord.parser import extract_progress, is_completed, extract_image_url
+from app.providers.discord.parser import (
+    extract_image_url,
+    extract_progress,
+    extract_upscale_buttons,
+    extract_upscale_index,
+    is_completed,
+    is_grid_completion,
+)
 from app.providers.discord.correlation import CorrelationManager
 
 logger = logging.getLogger(__name__)
@@ -30,6 +37,8 @@ class GatewayMonitor:
         self._on_progress: Callable[..., Coroutine] | None = None
         self._on_complete: Callable[..., Coroutine] | None = None
         self._on_error: Callable[..., Coroutine] | None = None
+        self._on_grid_complete: Callable[..., Coroutine] | None = None
+        self._on_upscale_result: Callable[..., Coroutine] | None = None
 
         intents = discord.Intents.default()
         intents.message_content = True
@@ -43,10 +52,14 @@ class GatewayMonitor:
         on_progress: Callable[..., Coroutine],
         on_complete: Callable[..., Coroutine],
         on_error: Callable[..., Coroutine],
+        on_grid_complete: Callable[..., Coroutine],
+        on_upscale_result: Callable[..., Coroutine],
     ) -> None:
         self._on_progress = on_progress
         self._on_complete = on_complete
         self._on_error = on_error
+        self._on_grid_complete = on_grid_complete
+        self._on_upscale_result = on_upscale_result
 
     async def start(self) -> None:
         await self._client.start(self._bot_token)
@@ -73,9 +86,30 @@ class GatewayMonitor:
             logger.warning("Unknown correlation tag: %s", tag)
             return
 
-        if is_completed(message):
+        if is_grid_completion(message):
+            # Grid completed with U1-U4 buttons
             image_url = extract_image_url(message)
-            if self._on_complete:
+            upscale_buttons = extract_upscale_buttons(message)
+            if self._on_grid_complete:
+                await self._on_grid_complete(
+                    correlation_tag=tag,
+                    task_id=task_id,
+                    image_url=image_url,
+                    message_id=str(message.id),
+                    upscale_buttons=upscale_buttons,
+                )
+        elif is_completed(message):
+            # Completed without U1-U4 buttons — upscale result or direct complete
+            image_url = extract_image_url(message)
+            upscale_index = extract_upscale_index(message.content)
+            if upscale_index is not None and self._on_upscale_result:
+                await self._on_upscale_result(
+                    correlation_tag=tag,
+                    task_id=task_id,
+                    image_url=image_url,
+                    upscale_index=upscale_index,
+                )
+            elif self._on_complete:
                 await self._on_complete(
                     correlation_tag=tag,
                     task_id=task_id,

@@ -44,11 +44,15 @@ class DiscordMidjourneyClient:
         on_progress: Callable[..., Coroutine],
         on_complete: Callable[..., Coroutine],
         on_error: Callable[..., Coroutine],
+        on_grid_complete: Callable[..., Coroutine],
+        on_upscale_result: Callable[..., Coroutine],
     ) -> None:
         self._gateway.set_callbacks(
             on_progress=on_progress,
             on_complete=on_complete,
             on_error=on_error,
+            on_grid_complete=on_grid_complete,
+            on_upscale_result=on_upscale_result,
         )
 
     async def start(self) -> None:
@@ -64,6 +68,19 @@ class DiscordMidjourneyClient:
                 await self._bot_task
             except asyncio.CancelledError:
                 pass
+
+    async def upscale(
+        self,
+        message_id: str,
+        custom_id: str,
+    ) -> None:
+        status_code = await self._interaction.send_component_interaction(
+            message_id, custom_id
+        )
+        if status_code not in (200, 204):
+            raise RuntimeError(
+                f"Failed to send upscale interaction: HTTP {status_code}"
+            )
 
     async def imagine(
         self,

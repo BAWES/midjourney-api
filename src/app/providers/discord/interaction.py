@@ -115,6 +115,41 @@ class InteractionClient:
         )
         return resp.status_code
 
+    async def send_component_interaction(
+        self, message_id: str, custom_id: str
+    ) -> int:
+        """Send a component interaction (type 3) to click a button."""
+        assert self._http is not None
+        guild_id = await self.get_guild_id()
+
+        import asyncio
+
+        delay = random.uniform(1.0, 2.0)
+        await asyncio.sleep(delay)
+
+        payload = {
+            "type": 3,
+            "guild_id": guild_id,
+            "channel_id": self._channel_id,
+            "message_id": message_id,
+            "application_id": MJ_APP_ID,
+            "session_id": str(random.randint(100000, 999999)),
+            "data": {
+                "component_type": 2,
+                "custom_id": custom_id,
+            },
+        }
+
+        resp = await self._http.post(
+            f"{DISCORD_API}/interactions",
+            json=payload,
+            headers={
+                "Authorization": self._user_token,
+                "Content-Type": "application/json",
+            },
+        )
+        return resp.status_code
+
     def invalidate_command_cache(self) -> None:
         self._command_cache = None
         self._cache_time = 0.0

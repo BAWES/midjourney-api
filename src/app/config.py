@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # Task timeout in seconds
     mj_task_timeout_seconds: int = 120
 
+    # Upscale phase timeout in seconds
+    mj_upscale_timeout_seconds: int = 180
+
     # Quota: platform-wide daily limit
     platform_daily_limit: int = 100
 

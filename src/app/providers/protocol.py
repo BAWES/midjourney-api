@@ -11,6 +11,12 @@ class MidjourneyClient(Protocol):
         correlation_tag: str,
     ) -> None: ...
 
+    async def upscale(
+        self,
+        message_id: str,
+        custom_id: str,
+    ) -> None: ...
+
     async def start(self) -> None: ...
 
     async def stop(self) -> None: ...
@@ -20,4 +26,6 @@ class MidjourneyClient(Protocol):
         on_progress: Callable[..., Coroutine],
         on_complete: Callable[..., Coroutine],
         on_error: Callable[..., Coroutine],
+        on_grid_complete: Callable[..., Coroutine],
+        on_upscale_result: Callable[..., Coroutine],
     ) -> None: ...

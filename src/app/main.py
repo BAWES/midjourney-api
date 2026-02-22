@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         dispatch_queue=dispatch_queue,
         max_concurrent=settings.mj_max_concurrent_jobs,
         timeout_seconds=settings.mj_task_timeout_seconds,
+        upscale_timeout_seconds=settings.mj_upscale_timeout_seconds,
     )
 
     await mj_client.start()
