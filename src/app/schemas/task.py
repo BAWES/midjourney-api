@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -11,7 +12,7 @@ class ImagineRequest(BaseModel):
 
 class ImagineResponse(BaseModel):
     task_id: uuid.UUID
-    status: str
+    status: Literal["queued"] = "queued"
 
 
 class TaskResponse(BaseModel):

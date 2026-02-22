@@ -5,11 +5,13 @@ payload construction, and anti-detection delays.
 """
 
 import random
+import time
 
 import httpx
 
 MJ_APP_ID = "936929561302675456"
 DISCORD_API = "https://discord.com/api/v10"
+COMMAND_CACHE_TTL = 3600  # 1 hour
 
 
 class InteractionClient:
@@ -19,6 +21,7 @@ class InteractionClient:
         self._http: httpx.AsyncClient | None = None
         self._guild_id: str | None = None
         self._command_cache: dict | None = None
+        self._cache_time: float = 0.0
 
     async def start(self) -> None:
         self._http = httpx.AsyncClient(timeout=30)
@@ -41,7 +44,8 @@ class InteractionClient:
         return self._guild_id
 
     async def get_imagine_command(self, force_refresh: bool = False) -> dict:
-        if self._command_cache and not force_refresh:
+        cache_expired = (time.monotonic() - self._cache_time) > COMMAND_CACHE_TTL
+        if self._command_cache and not force_refresh and not cache_expired:
             return self._command_cache
         assert self._http is not None
         guild_id = await self.get_guild_id()
@@ -54,6 +58,7 @@ class InteractionClient:
         for cmd in data.get("application_commands", []):
             if cmd.get("name") == "imagine" and cmd.get("application_id") == MJ_APP_ID:
                 self._command_cache = cmd
+                self._cache_time = time.monotonic()
                 return cmd
         raise RuntimeError("Midjourney /imagine command not found in guild")
 
@@ -112,3 +117,4 @@ class InteractionClient:
 
     def invalidate_command_cache(self) -> None:
         self._command_cache = None
+        self._cache_time = 0.0

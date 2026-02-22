@@ -39,12 +39,14 @@ class QuotaService:
         if platform_used >= settings.platform_daily_limit:
             return False
 
-        # Atomic daily check-and-deduct
+        # Atomic daily check-and-deduct (row lock prevents TOCTOU race)
         existing = await self._db.execute(
-            select(QuotaUsage).where(
+            select(QuotaUsage)
+            .where(
                 QuotaUsage.api_key_id == api_key.id,
                 QuotaUsage.usage_date == today,
             )
+            .with_for_update()
         )
         quota = existing.scalar_one_or_none()
 
