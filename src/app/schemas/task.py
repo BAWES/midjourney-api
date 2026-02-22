@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class ImagineRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=4000)
     aspect_ratio: str = Field(default="1:1", pattern=r"^\d+:\d+$")
+    upscale_count: int = Field(default=1, ge=1, le=4)
 
 
 class ImagineResponse(BaseModel):
@@ -22,6 +23,8 @@ class TaskResponse(BaseModel):
     status: str
     progress: int
     image_url: str | None = None
+    image_urls: list[str] | None = None
+    upscale_count: int = 1
     error_message: str | None = None
     created_at: datetime
     updated_at: datetime

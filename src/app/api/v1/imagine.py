@@ -28,5 +28,5 @@ async def imagine(
     db: AsyncSession = Depends(get_db_session),
 ) -> ImagineResponse:
     svc = ImagineService(db, _dispatch_queue, _correlation)
-    task = await svc.submit(api_key, body.prompt, body.aspect_ratio)
+    task = await svc.submit(api_key, body.prompt, body.aspect_ratio, body.upscale_count)
     return ImagineResponse(task_id=task.id, status=task.status.value)

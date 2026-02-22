@@ -20,5 +20,6 @@ class TimestampMixin:
 class TaskStatus(enum.Enum):
     QUEUED = "queued"
     PROCESSING = "processing"
+    UPSCALING = "upscaling"
     SUCCESS = "success"
     FAILED = "failed"

@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 
 from app.models.base import Base, TaskStatus, TimestampMixin
 
@@ -26,6 +27,8 @@ class Task(TimestampMixin, Base):
     status: Mapped[TaskStatus] = mapped_column(default=TaskStatus.QUEUED)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    upscale_count: Mapped[int] = mapped_column(Integer, default=1)
     correlation_tag: Mapped[str | None] = mapped_column(String(20), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 

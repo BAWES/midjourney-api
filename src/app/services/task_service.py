@@ -11,7 +11,8 @@ from app.models.task import Task
 
 VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
     TaskStatus.QUEUED: {TaskStatus.PROCESSING, TaskStatus.FAILED},
-    TaskStatus.PROCESSING: {TaskStatus.SUCCESS, TaskStatus.FAILED},
+    TaskStatus.PROCESSING: {TaskStatus.SUCCESS, TaskStatus.FAILED, TaskStatus.UPSCALING},
+    TaskStatus.UPSCALING: {TaskStatus.SUCCESS, TaskStatus.FAILED},
     TaskStatus.SUCCESS: set(),
     TaskStatus.FAILED: set(),
 }
@@ -26,6 +27,7 @@ class TaskService:
         api_key_id: uuid.UUID,
         prompt: str,
         aspect_ratio: str = "1:1",
+        upscale_count: int = 1,
     ) -> Task:
         task = Task(
             api_key_id=api_key_id,
@@ -33,6 +35,7 @@ class TaskService:
             aspect_ratio=aspect_ratio,
             status=TaskStatus.QUEUED,
             progress=0,
+            upscale_count=upscale_count,
         )
         self._db.add(task)
         await self._db.commit()
@@ -104,6 +107,15 @@ class TaskService:
     async def update_image_url(self, task_id: uuid.UUID, image_url: str) -> Task:
         task = await self.get_task_by_id(task_id)
         task.image_url = image_url
+        await self._db.commit()
+        await self._db.refresh(task)
+        return task
+
+    async def update_image_urls(
+        self, task_id: uuid.UUID, image_urls: list[str]
+    ) -> Task:
+        task = await self.get_task_by_id(task_id)
+        task.image_urls = image_urls
         await self._db.commit()
         await self._db.refresh(task)
         return task

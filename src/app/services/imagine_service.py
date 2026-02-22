@@ -48,6 +48,7 @@ class ImagineService:
         api_key: ApiKey,
         prompt: str,
         aspect_ratio: str = "1:1",
+        upscale_count: int = 1,
     ) -> Task:
         # 0. Sanitize prompt
         prompt = self.sanitize_prompt(prompt)
@@ -61,6 +62,7 @@ class ImagineService:
             api_key_id=api_key.id,
             prompt=prompt,
             aspect_ratio=aspect_ratio,
+            upscale_count=upscale_count,
         )
 
         # 3. Generate and set correlation tag
