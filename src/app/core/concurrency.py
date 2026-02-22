@@ -88,6 +88,9 @@ class ConcurrencyLimiter:
                 task = await task_svc.get_task_by_id(task_id)
                 await task_svc.transition(task_id, TaskStatus.PROCESSING)
 
+                self._mj_client.set_upscale_count(
+                    task.correlation_tag, task.upscale_count
+                )
                 await self._mj_client.imagine(
                     prompt=task.prompt,
                     aspect_ratio=task.aspect_ratio,
@@ -342,7 +345,10 @@ class ConcurrencyLimiter:
                 if task.correlation_tag:
                     self._correlation.register(task.correlation_tag, str(task.id))
 
-            # UPSCALING tasks cannot be recovered (in-memory state lost)
+            # UPSCALING tasks cannot be recovered (in-memory state lost).
+            # No semaphore acquire/release needed: semaphore is fresh on restart,
+            # and we only acquire for PROCESSING tasks that remain active.
+            # UPSCALING tasks are failed immediately, freeing their slots implicitly.
             result = await db.execute(
                 select(Task).where(Task.status == TaskStatus.UPSCALING)
             )
@@ -354,3 +360,5 @@ class ConcurrencyLimiter:
                 task.error_message = "Upscale state lost due to server restart"
                 await db.commit()
                 await task_svc.transition(task.id, TaskStatus.FAILED)
+                if task.correlation_tag:
+                    self._correlation.unregister(task.correlation_tag)

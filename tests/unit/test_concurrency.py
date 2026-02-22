@@ -3,7 +3,7 @@
 import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -30,6 +30,7 @@ class TestConcurrencyLimiterDispatch:
 
         mock_client = AsyncMock()
         mock_client.imagine = AsyncMock()
+        mock_client.set_upscale_count = MagicMock()
         queue: asyncio.Queue[uuid.UUID] = asyncio.Queue()
 
         limiter = ConcurrencyLimiter(
@@ -57,6 +58,7 @@ class TestConcurrencyLimiterDispatch:
         correlation.register(tag, str(task_id))
 
         mock_client = AsyncMock()
+        mock_client.set_upscale_count = MagicMock()
         queue: asyncio.Queue[uuid.UUID] = asyncio.Queue()
 
         limiter = ConcurrencyLimiter(
@@ -85,6 +87,7 @@ class TestConcurrencyLimiterDispatch:
 
         mock_client = AsyncMock()
         mock_client.imagine = AsyncMock(side_effect=RuntimeError("Discord error"))
+        mock_client.set_upscale_count = MagicMock()
         queue: asyncio.Queue[uuid.UUID] = asyncio.Queue()
 
         limiter = ConcurrencyLimiter(

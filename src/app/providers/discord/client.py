@@ -82,6 +82,14 @@ class DiscordMidjourneyClient:
                 f"Failed to send upscale interaction: HTTP {status_code}"
             )
 
+    def set_upscale_count(
+        self,
+        correlation_tag: str,
+        count: int,
+    ) -> None:
+        # No-op: Discord upscale count is driven by ConcurrencyLimiter
+        pass
+
     async def imagine(
         self,
         prompt: str,
