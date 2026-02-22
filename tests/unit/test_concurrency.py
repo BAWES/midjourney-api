@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -93,7 +93,8 @@ class TestConcurrencyLimiterDispatch:
             correlation=correlation,
             dispatch_queue=queue,
         )
-        await limiter.dispatch_one(task_id)
+        with pytest.raises(RuntimeError, match="Discord error"):
+            await limiter.dispatch_one(task_id)
 
         db.expire_all()
         refreshed = await task_svc.get_task_by_id(task_id)
@@ -224,7 +225,7 @@ class TestConcurrencyLimiterTimeout:
         await task_svc.transition(task_id, TaskStatus.PROCESSING)
 
         # Manually set updated_at to the past
-        task.updated_at = datetime.utcnow() - timedelta(seconds=200)
+        task.updated_at = datetime.now(timezone.utc) - timedelta(seconds=200)
         await db.commit()
 
         correlation = CorrelationManager()

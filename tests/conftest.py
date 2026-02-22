@@ -1,10 +1,10 @@
-import hashlib
 import uuid
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.api.deps import hash_api_key
 from app.models.base import Base
 from app.models.api_key import ApiKey
 
@@ -43,7 +43,7 @@ def raw_api_key() -> str:
 
 @pytest.fixture
 async def api_key(db: AsyncSession, raw_api_key: str) -> ApiKey:
-    key_hash = hashlib.sha256(raw_api_key.encode()).hexdigest()
+    key_hash = hash_api_key(raw_api_key)
     key = ApiKey(
         name="Test Key",
         key_hash=key_hash,

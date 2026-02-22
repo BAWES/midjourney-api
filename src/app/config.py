@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # Quota: platform-wide daily limit
     platform_daily_limit: int = 100
 
+    # API key HMAC secret (required for production)
+    api_key_secret: str = "change-me-in-production"
+
     # API
     api_v1_prefix: str = "/api/v1"
 

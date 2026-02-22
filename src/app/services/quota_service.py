@@ -4,6 +4,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import OperationalError as SAOperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -17,7 +18,23 @@ class QuotaService:
     async def check_and_deduct(self, api_key: ApiKey) -> bool:
         today = date.today()
 
-        # Check monthly limit
+        # Lock daily row first to serialize per-key requests (prevents TOCTOU)
+        existing = await self._db.execute(
+            select(QuotaUsage)
+            .where(
+                QuotaUsage.api_key_id == api_key.id,
+                QuotaUsage.usage_date == today,
+            )
+            .with_for_update()
+        )
+        quota = existing.scalar_one_or_none()
+
+        # Check daily limit
+        daily_used = quota.daily_used if quota else 0
+        if daily_used >= api_key.daily_limit:
+            return False
+
+        # Check monthly limit (safe: row lock serializes same-key concurrent requests)
         first_of_month = today.replace(day=1)
         monthly_result = await self._db.execute(
             select(func.coalesce(func.sum(QuotaUsage.daily_used), 0)).where(
@@ -29,7 +46,11 @@ class QuotaService:
         if monthly_used >= api_key.monthly_limit:
             return False
 
-        # Check platform-wide daily limit
+        # Advisory lock for platform-wide daily limit (PostgreSQL only; no-op on SQLite)
+        try:
+            await self._db.execute(text("SELECT pg_advisory_xact_lock(0)"))
+        except SAOperationalError:
+            pass
         platform_result = await self._db.execute(
             select(func.coalesce(func.sum(QuotaUsage.daily_used), 0)).where(
                 QuotaUsage.usage_date == today,
@@ -39,17 +60,7 @@ class QuotaService:
         if platform_used >= settings.platform_daily_limit:
             return False
 
-        # Atomic daily check-and-deduct (row lock prevents TOCTOU race)
-        existing = await self._db.execute(
-            select(QuotaUsage)
-            .where(
-                QuotaUsage.api_key_id == api_key.id,
-                QuotaUsage.usage_date == today,
-            )
-            .with_for_update()
-        )
-        quota = existing.scalar_one_or_none()
-
+        # Deduct
         if quota is None:
             quota = QuotaUsage(
                 api_key_id=api_key.id,
@@ -57,13 +68,8 @@ class QuotaService:
                 daily_used=1,
             )
             self._db.add(quota)
-            await self._db.commit()
-            return True
-
-        if quota.daily_used >= api_key.daily_limit:
-            return False
-
-        quota.daily_used += 1
+        else:
+            quota.daily_used += 1
         await self._db.commit()
         return True
 

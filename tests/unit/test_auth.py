@@ -1,6 +1,5 @@
 """Tests for API Key authentication dependency."""
 
-import hashlib
 import uuid
 
 import pytest
@@ -8,7 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.api.deps import get_db_session
+from app.api.deps import get_db_session, hash_api_key
 from app.database import get_db
 from app.main import app
 from app.models.api_key import ApiKey
@@ -71,7 +70,7 @@ class TestApiKeyAuth:
         self, auth_db: AsyncSession, auth_client: AsyncClient
     ) -> None:
         raw_key = "valid-test-key-12345"
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        key_hash = hash_api_key(raw_key)
         api_key = ApiKey(name="Valid", key_hash=key_hash, is_active=True)
         auth_db.add(api_key)
         await auth_db.commit()
@@ -95,7 +94,7 @@ class TestApiKeyAuth:
         self, auth_db: AsyncSession, auth_client: AsyncClient
     ) -> None:
         raw_key = "inactive-test-key-12345"
-        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        key_hash = hash_api_key(raw_key)
         api_key = ApiKey(name="Inactive", key_hash=key_hash, is_active=False)
         auth_db.add(api_key)
         await auth_db.commit()

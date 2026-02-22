@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -12,6 +12,7 @@ from app.models.api_key import ApiKey
 from app.models.base import TaskStatus
 from app.models.task import Task
 from app.providers.discord.correlation import CorrelationManager
+from app.providers.protocol import MidjourneyClient
 from app.services.quota_service import QuotaService
 from app.services.task_service import TaskService
 from app.services.usage_service import UsageService
@@ -23,7 +24,7 @@ class ConcurrencyLimiter:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        mj_client: object,
+        mj_client: MidjourneyClient,
         correlation: CorrelationManager,
         dispatch_queue: asyncio.Queue[uuid.UUID],
         max_concurrent: int = 3,
@@ -72,6 +73,7 @@ class ConcurrencyLimiter:
             await self.dispatch_one(task_id)
         except Exception:
             logger.exception("Dispatch failed for task %s", task_id)
+            # Semaphore released here only — dispatch_one never releases on error
             self._semaphore.release()
 
     async def dispatch_one(self, task_id: uuid.UUID) -> None:
@@ -91,8 +93,10 @@ class ConcurrencyLimiter:
                 try:
                     await task_svc.transition(task_id, TaskStatus.FAILED)
                 except Exception:
-                    pass
-                self._semaphore.release()
+                    logger.exception(
+                        "Failed to transition task %s to FAILED", task_id
+                    )
+                raise  # Re-raise so _dispatch_wrapper handles semaphore
 
     async def on_progress(self, correlation_tag: str, progress: int, **kwargs: object) -> None:
         tag = correlation_tag
@@ -147,7 +151,7 @@ class ConcurrencyLimiter:
             await self.check_timeouts()
 
     async def check_timeouts(self) -> None:
-        cutoff = datetime.utcnow() - timedelta(seconds=self._timeout)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=self._timeout)
         async with self._session_factory() as db:
             result = await db.execute(
                 select(Task).where(

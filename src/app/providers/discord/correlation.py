@@ -1,14 +1,14 @@
 """Correlation tag strategy for matching MJ responses to tasks.
 
-Embeds a unique tag (mjr-{8-hex-chars}) in the prompt. When Midjourney
+Embeds a unique tag (mjr-{16-hex-chars}) in the prompt. When Midjourney
 echoes the prompt back, the tag is extracted and mapped to a task_id.
 """
 
 import re
-import uuid
+import secrets
 
 
-TAG_PATTERN = re.compile(r"mjr-[a-f0-9]{8}")
+TAG_PATTERN = re.compile(r"mjr-[a-f0-9]{16}")
 
 
 class CorrelationManager:
@@ -16,7 +16,7 @@ class CorrelationManager:
         self._tag_to_task: dict[str, str] = {}
 
     def generate_tag(self) -> str:
-        return f"mjr-{uuid.uuid4().hex[:8]}"
+        return f"mjr-{secrets.token_hex(8)}"
 
     def embed_in_prompt(self, prompt: str, tag: str) -> str:
         return f"{prompt} {tag}"

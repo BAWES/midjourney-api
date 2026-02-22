@@ -127,7 +127,7 @@ class TestCorrelationManager:
         mgr = CorrelationManager()
         tag = mgr.generate_tag()
         assert tag.startswith("mjr-")
-        assert len(tag) == 12  # "mjr-" + 8 hex chars
+        assert len(tag) == 20  # "mjr-" + 16 hex chars
 
     def test_embed_tag_in_prompt(self) -> None:
         mgr = CorrelationManager()
@@ -138,7 +138,7 @@ class TestCorrelationManager:
 
     def test_extract_tag_from_text(self) -> None:
         mgr = CorrelationManager()
-        tag = "mjr-abc12345"
+        tag = "mjr-abc1234567890def"
         text = f"**a beautiful sunset {tag}** - (50%)"
         assert mgr.extract_tag(text) == tag
 

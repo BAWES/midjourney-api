@@ -1,7 +1,6 @@
 """Integration tests for API endpoints using httpx AsyncClient."""
 
 import asyncio
-import hashlib
 import uuid
 
 import pytest
@@ -9,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.api.deps import get_current_api_key, get_db_session
+from app.api.deps import get_current_api_key, get_db_session, hash_api_key
 from app.models.api_key import ApiKey
 from app.models.base import Base, TaskStatus
 from app.main import app
@@ -54,7 +53,7 @@ def raw_key() -> str:
 
 @pytest.fixture
 async def test_api_key(test_db: AsyncSession, raw_key: str) -> ApiKey:
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    key_hash = hash_api_key(raw_key)
     key = ApiKey(
         name="Test Key",
         key_hash=key_hash,

@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 from collections.abc import AsyncGenerator
 
 from fastapi import Depends, HTTPException, status
@@ -6,6 +7,7 @@ from fastapi.security import APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models.api_key import ApiKey
 
@@ -13,7 +15,11 @@ api_key_header = APIKeyHeader(name="X-API-Key")
 
 
 def hash_api_key(raw_key: str) -> str:
-    return hashlib.sha256(raw_key.encode()).hexdigest()
+    return hmac.new(
+        settings.api_key_secret.encode(),
+        raw_key.encode(),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 async def get_current_api_key(

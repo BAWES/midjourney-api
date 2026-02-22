@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.core.logging import setup_logging
 from app.database import engine
-from app.exceptions import QuotaExceededError, TaskNotFoundError
+from app.exceptions import InvalidStateTransitionError, QuotaExceededError, TaskNotFoundError
 from app.middleware.correlation_id import CorrelationIdMiddleware
 
 
@@ -78,6 +78,13 @@ async def task_not_found_handler(request: Request, exc: TaskNotFoundError) -> JS
 @app.exception_handler(QuotaExceededError)
 async def quota_exceeded_handler(request: Request, exc: QuotaExceededError) -> JSONResponse:
     return JSONResponse(status_code=429, content={"detail": exc.message})
+
+
+@app.exception_handler(InvalidStateTransitionError)
+async def invalid_transition_handler(
+    request: Request, exc: InvalidStateTransitionError
+) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": exc.message})
 
 
 @app.get("/health")
