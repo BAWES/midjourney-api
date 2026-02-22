@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from app.config import settings  # noqa: E402
 from app.models.base import Base  # noqa: E402
+from app.models.api_key import ApiKey, QuotaUsage  # noqa: E402, F401
+from app.models.task import Task, UsageLog  # noqa: E402, F401
 
 config = context.config
 
