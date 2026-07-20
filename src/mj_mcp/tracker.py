@@ -198,6 +198,12 @@ class TaskTracker:
 
     def to_result(self, state: TaskState) -> dict:
         """Serialize task state for tool response."""
+        # Grid layout: [1] [2]
+        #             [3] [4]
+        # grid_url first so the bot can show the layout overview
+        urls = list(state.image_urls)
+        if state.grid_url and urls:
+            urls = [state.grid_url] + urls
         return {
             "task_id": state.id,
             "status": state.status.value,
@@ -205,7 +211,7 @@ class TaskTracker:
             "prompt": state.prompt,
             "aspect_ratio": state.aspect_ratio,
             "grid_url": state.grid_url,
-            "image_urls": state.image_urls,
+            "image_urls": urls,
             "video_url": state.video_url,
             "message_id": state.message_id,
             "upscale_buttons": list(state.upscale_buttons.keys()),
