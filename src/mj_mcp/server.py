@@ -74,10 +74,9 @@ logger = logging.getLogger("mj-mcp")
 
 from mj_mcp.discord.interaction import InteractionClient
 from mj_mcp.discord.gateway import GatewayMonitor
-from mj_mcp.discord.correlation import CorrelationManager
+from mj_mcp.discord import correlation as mj_correl
 from mj_mcp.tracker import TaskTracker
 
-correlation = CorrelationManager()
 tracker = TaskTracker()
 interaction: InteractionClient | None = None
 gateway: GatewayMonitor | None = None
@@ -138,19 +137,24 @@ async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
     state = await tracker.create_task(prompt, aspect_ratio)
     async with _in_flight_lock:
         _in_flight[prompt_key] = state.id
-    tag = correlation.generate_tag()
-    await tracker.set_correlation(state.id, tag)
-    correlation.register(tag, state.id)
 
-    tagged = correlation.embed_in_prompt(prompt, tag)
-    if aspect_ratio != "1:1":
-        tagged = f"{tagged} --ar {aspect_ratio}"
+    # Rate limit: minimum 3s between fresh imagine calls
+    wait_time = mj_correl.check_rate_limit()
+    if wait_time:
+        logger.info("Rate limit: waiting %.1fs before next imagine", wait_time)
+        await asyncio.sleep(wait_time)
+    mj_correl.update_last_imagine_time()
 
-    status = await interaction.send_imagine(tagged)
+    # Set as current task for gateway message routing
+    mj_correl.set_current(state.id)
+
+    # Send prompt as-is — no tags, no injection
+    final_prompt = f"{prompt} --ar {aspect_ratio}" if aspect_ratio != "1:1" else prompt
+    status = await interaction.send_imagine(final_prompt)
     if status not in (200, 204):
         interaction.invalidate_command_cache()
         await asyncio.sleep(1)
-        status = await interaction.send_imagine(tagged)
+        status = await interaction.send_imagine(final_prompt)
         if status not in (200, 204):
             await tracker.set_failed(state.id, f"Discord returned HTTP {status}")
             return None
@@ -233,9 +237,7 @@ async def _click_and_wait(
         return None
 
     new_state = await tracker.create_task(prompt, aspect_ratio)
-    tag = correlation.generate_tag()
-    await tracker.set_correlation(new_state.id, tag)
-    correlation.register(tag, new_state.id)
+    mj_correl.set_current(new_state.id)
 
     try:
         await asyncio.wait_for(new_state.complete_event.wait(), timeout=GENERATION_TIMEOUT)
@@ -411,9 +413,7 @@ async def animate(
                         f"animate img{image_index}: {state.prompt}",
                         state.aspect_ratio,
                     )
-                    tag = correlation.generate_tag()
-                    await tracker.set_correlation(new_id.id, tag)
-                    correlation.register(tag, new_id.id)
+                    mj_correl.set_current(new_id.id)
                     try:
                         await asyncio.wait_for(new_id.complete_event.wait(), timeout=GENERATION_TIMEOUT)
                     except asyncio.TimeoutError:
@@ -458,7 +458,7 @@ async def describe(image_url: Annotated[str, "Public URL of the image to analyze
 
 
 async def _on_grid_complete(
-    correlation_tag: str, task_id: str, image_url: str,
+    task_id: str, image_url: str,
     message_id: str, upscale_buttons: dict, all_buttons: dict,
     has_animate: bool, **kwargs,
 ):
@@ -469,7 +469,7 @@ async def _on_grid_complete(
 
 
 async def _on_single_complete(
-    correlation_tag: str, task_id: str, image_urls: list[str], message_id: str, **kwargs,
+    task_id: str, image_urls: list[str], message_id: str, **kwargs,
 ):
     """Handle a single image result — could be an upscale or direct complete."""
     state = await tracker.get_task(task_id)
@@ -484,12 +484,12 @@ async def _on_single_complete(
 
 
 async def _on_video_complete(
-    correlation_tag: str, task_id: str, video_url: str, **kwargs,
+    task_id: str, video_url: str, **kwargs,
 ):
     await tracker.set_video_complete(task_id, video_url)
 
 
-async def _on_progress(correlation_tag: str, task_id: str, progress: int, **kwargs):
+async def _on_progress(task_id: str, progress: int, **kwargs):
     await tracker.update_progress(task_id, progress)
 
 
@@ -523,7 +523,6 @@ async def start_backend():
         gateway = GatewayMonitor(
             bot_token=DISCORD_BOT_TOKEN,
             channel_id=int(MJ_CHANNEL_ID),
-            correlation_manager=correlation,
         )
         gateway.set_callbacks(
             on_progress=_on_progress,

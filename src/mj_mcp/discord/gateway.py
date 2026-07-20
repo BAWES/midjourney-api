@@ -2,6 +2,9 @@
 
 Connects via discord.py, filters by channel and MJ Bot ID,
 parses messages, and fires callbacks for the MCP task tracker.
+
+Since imagine calls are processed one at a time (dedup + queue),
+the active task ID is tracked globally — no correlation tags in prompts needed.
 """
 
 import asyncio
@@ -10,7 +13,7 @@ from collections.abc import Callable, Coroutine
 
 import discord
 
-from mj_mcp.discord.correlation import CorrelationManager
+from mj_mcp.discord import correlation
 from mj_mcp.discord.parser import (
     extract_all_image_urls,
     extract_all_buttons,
@@ -33,13 +36,11 @@ class GatewayMonitor:
         self,
         bot_token: str,
         channel_id: int,
-        correlation_manager: CorrelationManager,
     ) -> None:
         self._bot_token = bot_token
         self._channel_id = channel_id
-        self._correlation = correlation_manager
 
-        # Callback hooks — set by task tracker
+        # Callback hooks
         self._on_progress: Callable[..., Coroutine] | None = None
         self._on_grid_complete: Callable[..., Coroutine] | None = None
         self._on_single_complete: Callable[..., Coroutine] | None = None
@@ -82,24 +83,23 @@ class GatewayMonitor:
 
     async def _handle_message(self, message: discord.Message) -> None:
         if not self._should_process(message):
-            logger.debug("Skipping message from %s in channel %s (not MJ bot or wrong channel)",
-                         message.author.id, message.channel.id)
             return
 
-        tag = self._correlation.extract_tag(message.content)
-        logger.info("MJ message from bot: tag=%s content=%.80s attachments=%d",
-                     tag, message.content, len(message.attachments) if message.attachments else 0)
-        if not tag:
-            return
-        task_id = self._correlation.lookup(tag)
+        task_id = correlation.get_current()
         if not task_id:
-            logger.warning("Unknown correlation tag: %s", tag)
             return
 
-        # 1. Video result?
+        msg_id = str(message.id)
+
+        # Track this message as belonging to the current task
+        correlation.track_message(msg_id, task_id)
+
+        # Check if it's an edit of a previously tracked message (progress/grid update)
+        is_edit = correlation.is_tracked(msg_id)
+
+        # 1. Video result
         if is_video_result(message) and self._on_video_complete:
             await self._on_video_complete(
-                correlation_tag=tag,
                 task_id=task_id,
                 video_url=extract_image_url(message),
             )
@@ -111,7 +111,6 @@ class GatewayMonitor:
             buttons = extract_upscale_buttons(message)
             all_buttons = extract_all_buttons(message)
             await self._on_grid_complete(
-                correlation_tag=tag,
                 task_id=task_id,
                 image_url=image_url,
                 message_id=str(message.id),
@@ -121,11 +120,10 @@ class GatewayMonitor:
             )
             return
 
-        # 3. Single image completion (upscale, variation result, direct complete)
+        # 3. Single image completion
         if is_completed(message) and self._on_single_complete:
             urls = extract_all_image_urls(message)
             await self._on_single_complete(
-                correlation_tag=tag,
                 task_id=task_id,
                 image_urls=urls,
                 message_id=str(message.id),
@@ -136,7 +134,6 @@ class GatewayMonitor:
         progress = extract_progress(message.content)
         if progress is not None and self._on_progress:
             await self._on_progress(
-                correlation_tag=tag,
                 task_id=task_id,
                 progress=progress,
             )
@@ -154,7 +151,6 @@ class GatewayMonitor:
     _on_message_edit.__name__ = "on_message_edit"
 
     async def _on_ready(self) -> None:
-        """Called when discord.py connects successfully."""
         logger.info(
             "Gateway connected! Bot: %s (ID: %s)",
             self._client.user.name if self._client.user else "?",
