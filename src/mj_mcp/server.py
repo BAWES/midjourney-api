@@ -441,6 +441,10 @@ async def _on_grid_complete(
     message_id: str, upscale_buttons: dict, all_buttons: dict,
     has_animate: bool, **kwargs,
 ):
+    # Don't re-process grid if already set
+    state = await tracker.get_task(task_id)
+    if state and state.grid_url:
+        return
     logger.info("Grid complete: task=%s buttons=%s msg=%s", task_id[:8], list(upscale_buttons.keys()), message_id)
     await tracker.set_grid_complete(
         task_id, image_url, message_id,
@@ -453,7 +457,7 @@ async def _on_single_complete(
 ):
     """Handle a single image result — could be an upscale or direct complete."""
     state = await tracker.get_task(task_id)
-    if state and state.status.value == "upscaling":
+    if state and state.status.value in ("upscaling", "grid_complete"):
         url = image_urls[0] if image_urls else ""
         if url:
             for i in range(1, 5):
