@@ -55,7 +55,7 @@ MJ_MAX_CONCURRENT = int(os.environ.get("MJ_MAX_CONCURRENT_JOBS", "3"))
 GENERATION_TIMEOUT = int(os.environ.get("GENERATION_TIMEOUT_SECONDS", "120"))
 
 HOST = os.environ.get("HOST", "0.0.0.0")
-PORT = int(os.environ.get("PORT", "8004"))
+PORT = int(os.environ.get("PORT", "8005"))
 
 # ---------------------------------------------------------------------------
 # Logging
