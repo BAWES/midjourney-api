@@ -40,25 +40,9 @@ async def serve():
                 return JSONResponse({"error": "Invalid token"}, status_code=403)
             return await call_next(request)
 
-    # Build MCP ASGI app
-    mcp_app = mcp.streamable_http_app()
-    mcp_app.add_middleware(BearerAuthMiddleware)
-
-    # Mount everything under a single Starlette app with health endpoint
-    from starlette.applications import Starlette
-    from starlette.routing import Mount, Route
-
-    async def health_endpoint(request):
-        return JSONResponse({
-            "status": "ok" if _ready else "warming",
-            "gateway_connected": _ready,
-            "uptime_seconds": int(t.time() - _start_time),
-        })
-
-    app = Starlette(routes=[
-        Route("/health", endpoint=health_endpoint, methods=["GET"]),
-        Mount("/", app=mcp_app),
-    ])
+    # Run MCP app directly — no Starlette wrapper (breaks session manager)
+    app = mcp.streamable_http_app()
+    app.add_middleware(BearerAuthMiddleware)
 
     # Start backend on the same event loop
     await start_backend()

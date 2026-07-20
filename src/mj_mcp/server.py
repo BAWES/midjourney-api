@@ -96,6 +96,17 @@ _in_flight_lock: asyncio.Lock = asyncio.Lock()
 
 mcp = FastMCP("midjourney")
 
+# Health endpoint — no auth required (excluded by BearerAuthMiddleware)
+from starlette.responses import JSONResponse as _JSONResponse
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_endpoint(request):
+    return _JSONResponse({
+        "status": "ok" if _ready else "warming",
+        "gateway_connected": _ready,
+        "uptime_seconds": int(time.time() - _start_time),
+    })
+
 # ---- Tool helpers --------------------------------------------------------
 
 
