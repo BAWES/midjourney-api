@@ -13,12 +13,11 @@ from mj_mcp.server import (
 )
 
 
-def main():
+async def serve():
     import uvicorn
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.responses import JSONResponse
 
-    # Auth middleware
     class BearerAuthMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             if request.method == "OPTIONS":
@@ -39,22 +38,22 @@ def main():
                 return JSONResponse({"error": "Invalid token"}, status_code=403)
             return await call_next(request)
 
-    # Build ASGI app
     app = mcp.streamable_http_app()
     app.add_middleware(BearerAuthMiddleware)
 
-    # Start backend inside uvicorn's own event loop via startup event
-    @app.on_event("startup")
-    async def _start():
-        await start_backend()
-
-    @app.on_event("shutdown")
-    async def _stop():
-        await stop_backend()
+    # Start backend (gateway + interaction) on the same event loop
+    await start_backend()
 
     print(f"[MJ-MCP] Starting on http://{HOST}:{PORT}")
-    uvicorn.run(app, host=HOST, port=PORT, log_level="info")
+    config = uvicorn.Config(app, host=HOST, port=PORT, log_level="info")
+    server = uvicorn.Server(config)
+
+    try:
+        await server.serve()
+    finally:
+        await stop_backend()
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(serve())
