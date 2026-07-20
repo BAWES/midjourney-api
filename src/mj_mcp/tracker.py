@@ -1,7 +1,8 @@
 """In-memory task tracker for Midjourney generations.
 
 Manages active task states with correlation tags, message IDs,
-button data, and results. Thread-safe via asyncio.Lock.
+button data, results, and auto-upscale tracking.
+Thread-safe via asyncio.Lock.
 """
 
 import asyncio
@@ -22,7 +23,7 @@ class TaskStatus(Enum):
 
 @dataclass
 class TaskState:
-    id: str  # our internal task id (uuid4)
+    id: str
     prompt: str
     aspect_ratio: str
     correlation_tag: str = ""
@@ -48,14 +49,19 @@ class TaskState:
     complete_event: asyncio.Event = field(default_factory=asyncio.Event)
     error_message: str = ""
 
+    # Auto-upscale: how many upscales we expect and how many we've collected
+    expected_upscales: int = 4  # U1-U4 by default
+    upscale_results: dict[int, str] = field(default_factory=dict)  # index -> url
+    upscale_event: asyncio.Event = field(default_factory=asyncio.Event)
+
 
 class TaskTracker:
     """In-memory task store. Thread-safe via asyncio.Lock."""
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
-        self._tasks: dict[str, TaskState] = {}  # task_id -> state
-        self._correlation_to_task: dict[str, str] = {}  # tag -> task_id
+        self._tasks: dict[str, TaskState] = {}
+        self._correlation_to_task: dict[str, str] = {}
 
     async def create_task(self, prompt: str, aspect_ratio: str) -> TaskState:
         task_id = str(uuid.uuid4())
@@ -99,8 +105,8 @@ class TaskTracker:
         task_id: str,
         grid_url: str,
         message_id: str,
-        upscale_buttons: dict[int, str],
-        all_buttons: dict[str, str],
+        upscale_buttons: dict[int, str] | None = None,
+        all_buttons: dict[str, str] | None = None,
         has_animate: bool = False,
     ) -> None:
         async with self._lock:
@@ -108,11 +114,41 @@ class TaskTracker:
             if state:
                 state.grid_url = grid_url
                 state.message_id = message_id
-                state.upscale_buttons = upscale_buttons
-                state.all_buttons = all_buttons
+                state.upscale_buttons = upscale_buttons or {}
+                state.all_buttons = all_buttons or {}
                 state.status = TaskStatus.GRID_COMPLETE
                 state.progress = 100
                 state.grid_event.set()
+
+    async def start_upscale_phase(self, task_id: str, count: int = 4) -> None:
+        """Transition to UPSCALING and prepare to track results."""
+        async with self._lock:
+            state = self._tasks.get(task_id)
+            if state:
+                state.status = TaskStatus.UPSCALING
+                state.expected_upscales = count
+                state.upscale_results = {}
+                state.upscale_event.clear()
+
+    async def record_upscale_result(self, task_id: str, index: int, url: str) -> int:
+        """Record a single upscale result. Returns completed count."""
+        async with self._lock:
+            state = self._tasks.get(task_id)
+            if not state:
+                return 0
+            state.upscale_results[index] = url
+            state.progress = int(len(state.upscale_results) / state.expected_upscales * 100)
+            done = len(state.upscale_results)
+            if done >= state.expected_upscales:
+                state.status = TaskStatus.COMPLETED
+                state.image_urls = [
+                    state.upscale_results.get(i, state.grid_url)
+                    for i in range(1, state.expected_upscales + 1)
+                ]
+                state.completed_at = time.time()
+                state.complete_event.set()
+                state.upscale_event.set()
+            return done
 
     async def set_complete(self, task_id: str, image_urls: list[str]) -> None:
         async with self._lock:
@@ -122,6 +158,7 @@ class TaskTracker:
                 state.status = TaskStatus.COMPLETED
                 state.completed_at = time.time()
                 state.complete_event.set()
+                state.upscale_event.set()
 
     async def set_video_complete(self, task_id: str, video_url: str) -> None:
         async with self._lock:
@@ -132,6 +169,7 @@ class TaskTracker:
                 state.status = TaskStatus.COMPLETED
                 state.completed_at = time.time()
                 state.complete_event.set()
+                state.upscale_event.set()
 
     async def set_failed(self, task_id: str, error: str) -> None:
         async with self._lock:
@@ -142,6 +180,7 @@ class TaskTracker:
                 state.completed_at = time.time()
                 state.grid_event.set()
                 state.complete_event.set()
+                state.upscale_event.set()
 
     async def remove(self, task_id: str) -> None:
         async with self._lock:

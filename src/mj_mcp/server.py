@@ -1,9 +1,8 @@
 """Midjourney MCP Server — image and video generation via Discord self-bot.
 
 Wraps Discord interaction layer as FastMCP tools for Universe bot integration.
-Streamable HTTP transport with Bearer token auth.
-
-Deployment: python run.py
+Streamable HTTP transport with Bearer token auth. Auto-upscale: imagine()
+returns 4 individual HD images, not a raw grid.
 """
 
 import asyncio
@@ -27,14 +26,12 @@ except ImportError:
 
 from mcp.server.fastmcp import FastMCP, Context
 
-# Monkey-patch FastMCP's DNS rebinding check -- rejects valid Host headers
-# when behind a reverse proxy or Cloudflare tunnel.
-# Safe because auth is handled by our BearerAuthMiddleware.
+# Monkey-patch FastMCP's DNS rebinding check
 from mcp.server.transport_security import TransportSecurityMiddleware
 
 _orig_validate = TransportSecurityMiddleware.validate_request
 async def _patched_validate(self, request, is_post=False):
-    return None  # Skip Host header validation
+    return None
 
 TransportSecurityMiddleware.validate_request = _patched_validate
 
@@ -52,7 +49,8 @@ DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 DISCORD_USER_TOKEN = os.environ.get("DISCORD_USER_TOKEN", "")
 MJ_CHANNEL_ID = os.environ.get("MJ_CHANNEL_ID", "")
 MJ_MAX_CONCURRENT = int(os.environ.get("MJ_MAX_CONCURRENT_JOBS", "3"))
-GENERATION_TIMEOUT = int(os.environ.get("GENERATION_TIMEOUT_SECONDS", "120"))
+GENERATION_TIMEOUT = int(os.environ.get("GENERATION_TIMEOUT_SECONDS", "180"))
+UPSCALE_TIMEOUT = int(os.environ.get("UPSCALE_TIMEOUT_SECONDS", "120"))
 
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8005"))
@@ -93,7 +91,7 @@ mcp = FastMCP("midjourney")
 
 
 async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
-    """Send /imagine and return task id, or None on failure."""
+    """Send /imagine, wait for grid, auto-upscale U1-U4, return task id."""
     if not interaction:
         raise RuntimeError("Discord client not initialized")
 
@@ -115,12 +113,55 @@ async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
             await tracker.set_failed(state.id, f"Discord returned HTTP {status}")
             return None
 
+    # Wait for grid (4-image grid with U1-U4 buttons)
     try:
         await asyncio.wait_for(state.grid_event.wait(), timeout=GENERATION_TIMEOUT)
     except asyncio.TimeoutError:
         await tracker.set_failed(state.id, "Generation timed out")
 
+    # Check if grid arrived (if failed, don't try to upscale)
+    current = await tracker.get_task(state.id)
+    if not current or current.status.value == "failed":
+        return state.id
+
+    # Start upscale phase: click U1-U4 asynchronously
+    if current.upscale_buttons:
+        await tracker.start_upscale_phase(state.id, count=4)
+        # Fire upscale interactions in background
+        asyncio.create_task(_fire_upscales(state.id))
+
+        # Wait for all upscales to complete
+        try:
+            await asyncio.wait_for(current.upscale_event.wait(), timeout=UPSCALE_TIMEOUT)
+        except asyncio.TimeoutError:
+            # Log partial results — whatever we got is better than grid
+            current = await tracker.get_task(state.id)
+            if current and current.upscale_results:
+                urls = [current.upscale_results.get(i, current.grid_url) for i in range(1, 5)]
+                await tracker.set_complete(state.id, urls)
+            else:
+                await tracker.set_failed(state.id, "Upscale timed out with no results")
+
     return state.id
+
+
+async def _fire_upscales(task_id: str) -> None:
+    """Click U1, U2, U3, U4 buttons for a completed grid."""
+    if not interaction:
+        return
+    state = await tracker.get_task(task_id)
+    if not state or not state.message_id:
+        return
+
+    for i in range(1, 5):
+        custom_id = state.upscale_buttons.get(i)
+        if not custom_id:
+            continue
+        await asyncio.sleep(0.5)  # Small delay between clicks
+        try:
+            await interaction.send_component_interaction(state.message_id, custom_id)
+        except Exception as e:
+            logger.warning("Failed to send upscale U%d for %s: %s", i, task_id, e)
 
 
 async def _click_and_wait(
@@ -159,10 +200,10 @@ async def _task_result(task_id: str | None) -> dict:
 
 @mcp.tool()
 async def imagine(prompt: str, aspect_ratio: str = "1:1") -> dict:
-    """Generate images from a text prompt using Midjourney.
+    """Generate 4 HD images from a text prompt using Midjourney.
 
-    Returns a grid of 4 images. Use upscale() to get individual HD images,
-    vary() for variations, or animate() for video.
+    Auto-upscales: returns 4 individual HD image URLs, not a grid.
+    Use vary() for variations, animate() for video.
 
     Args:
         prompt: Text description of the image to generate
@@ -204,7 +245,7 @@ async def wait(task_id: str) -> dict:
 
 @mcp.tool()
 async def upscale(task_id: str, index: int) -> dict:
-    """Upscale one image from a completed 4-image grid.
+    """Manually upscale one image from a grid (usually not needed — imagine auto-upscales).
 
     Args:
         task_id: Task ID from imagine() result
@@ -295,11 +336,8 @@ async def reroll(task_id: str) -> dict:
 async def animate(task_id: str) -> dict:
     """Animate a generated image to create a short video.
 
-    Uses Midjourney's image-to-video feature. Click the Animate button
-    on a completed generation, or fallback to --animate flag.
-
     Args:
-        task_id: Task ID from upscale() or imagine() result
+        task_id: Task ID from imagine() result
     """
     state = await tracker.get_task(task_id)
     if not state:
@@ -356,6 +394,19 @@ async def _on_grid_complete(
 async def _on_single_complete(
     correlation_tag: str, task_id: str, image_urls: list[str], message_id: str, **kwargs,
 ):
+    """Handle a single image result — could be an upscale or a direct complete."""
+    # Check if this task is in upscale phase
+    state = await tracker.get_task(task_id)
+    if state and state.status.value == "upscaling":
+        # Try to derive which upscale index from the correlation context
+        # The upscale index isn't passed in the callback, so we auto-assign
+        # based on which slots are still empty
+        url = image_urls[0] if image_urls else ""
+        if url:
+            for i in range(1, 5):
+                if i not in state.upscale_results:
+                    done = await tracker.record_upscale_result(task_id, i, url)
+                    return
     await tracker.set_complete(task_id, image_urls)
 
 
@@ -373,7 +424,6 @@ async def _on_progress(correlation_tag: str, task_id: str, progress: int, **kwar
 
 
 async def start_backend():
-    """Initialize Discord connections and gateway."""
     global interaction, gateway, _semaphore
 
     if not DISCORD_USER_TOKEN or not MJ_CHANNEL_ID:
