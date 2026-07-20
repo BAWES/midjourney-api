@@ -11,6 +11,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Annotated
 
 # Load .env before anything else
 try:
@@ -199,15 +200,14 @@ async def _task_result(task_id: str | None) -> dict:
 
 
 @mcp.tool()
-async def imagine(prompt: str, aspect_ratio: str = "1:1") -> dict:
+async def imagine(
+    prompt: Annotated[str, "Text description of the image to generate"],
+    aspect_ratio: Annotated[str, "Aspect ratio (e.g. 1:1, 16:9, 9:16, 4:3, 3:4)"] = "1:1",
+) -> dict:
     """Generate 4 HD images from a text prompt using Midjourney.
 
     Auto-upscales: returns 4 individual HD image URLs, not a grid.
     Use vary() for variations, animate() for video.
-
-    Args:
-        prompt: Text description of the image to generate
-        aspect_ratio: Aspect ratio (e.g. 1:1, 16:9, 9:16, 4:3, 3:4)
     """
     task_id = await _send_imagine(prompt, aspect_ratio)
     return await _task_result(task_id)
@@ -217,11 +217,8 @@ async def imagine(prompt: str, aspect_ratio: str = "1:1") -> dict:
 
 
 @mcp.tool()
-async def wait(task_id: str) -> dict:
+async def wait(task_id: Annotated[str, "Task ID from imagine() or other tool"]) -> dict:
     """Wait for a task to complete and return latest status.
-
-    Args:
-        task_id: Task ID from imagine() or other tool
     """
     state = await tracker.get_task(task_id)
     if not state:
@@ -244,12 +241,11 @@ async def wait(task_id: str) -> dict:
 
 
 @mcp.tool()
-async def upscale(task_id: str, index: int) -> dict:
+async def upscale(
+    task_id: Annotated[str, "Task ID from imagine() result"],
+    index: Annotated[int, "Which image to upscale (1-4)"],
+) -> dict:
     """Manually upscale one image from a grid (usually not needed — imagine auto-upscales).
-
-    Args:
-        task_id: Task ID from imagine() result
-        index: Which image to upscale (1-4)
     """
     if index < 1 or index > 4:
         return {"error": "Index must be 1-4"}
@@ -273,12 +269,11 @@ async def upscale(task_id: str, index: int) -> dict:
 
 
 @mcp.tool()
-async def vary(task_id: str, index: int) -> dict:
+async def vary(
+    task_id: Annotated[str, "Task ID from imagine() result"],
+    index: Annotated[int, "Which image to vary (1-4)"],
+) -> dict:
     """Generate variations of one image from a grid.
-
-    Args:
-        task_id: Task ID from imagine() result
-        index: Which image to vary (1-4)
     """
     if index < 1 or index > 4:
         return {"error": "Index must be 1-4"}
@@ -305,11 +300,8 @@ async def vary(task_id: str, index: int) -> dict:
 
 
 @mcp.tool()
-async def reroll(task_id: str) -> dict:
+async def reroll(task_id: Annotated[str, "Task ID from imagine() or previous result"]) -> dict:
     """Regenerate with the same prompt (reroll).
-
-    Args:
-        task_id: Task ID from imagine() or previous result
     """
     state = await tracker.get_task(task_id)
     if not state:
@@ -333,11 +325,8 @@ async def reroll(task_id: str) -> dict:
 
 
 @mcp.tool()
-async def animate(task_id: str) -> dict:
-    """Animate a generated image to create a short video.
-
-    Args:
-        task_id: Task ID from imagine() result
+async def animate(task_id: Annotated[str, "Task ID from imagine() result"]) -> dict:
+    """Animate a generated image to create a short video using Midjourney's image-to-video feature.
     """
     state = await tracker.get_task(task_id)
     if not state:
@@ -366,11 +355,8 @@ async def animate(task_id: str) -> dict:
 
 
 @mcp.tool()
-async def describe(image_url: str) -> dict:
-    """Analyze an image and generate prompt suggestions.
-
-    Args:
-        image_url: Public URL of the image to describe
+async def describe(image_url: Annotated[str, "Public URL of the image to analyze"]) -> dict:
+    """Analyze an image and generate text prompts that could recreate it.
     """
     return {
         "note": "Midjourney /describe isn't supported via MCP yet (requires file upload to Discord). Use the Discord UI.",
