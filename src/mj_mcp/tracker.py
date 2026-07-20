@@ -50,9 +50,11 @@ class TaskState:
     error_message: str = ""
 
     # Auto-upscale: how many upscales we expect and how many we've collected
-    expected_upscales: int = 4  # U1-U4 by default
+    expected_upscales: int = 4
     upscale_results: dict[int, str] = field(default_factory=dict)  # index -> url
-    upscale_event: asyncio.Event = field(default_factory=asyncio.Event)
+    upscale_message_ids: dict[int, str] = field(default_factory=dict)  # index -> message_id
+    upscale_events: dict[int, asyncio.Event] = field(default_factory=dict)
+    upscale_complete_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class TaskTracker:
@@ -128,15 +130,21 @@ class TaskTracker:
                 state.status = TaskStatus.UPSCALING
                 state.expected_upscales = count
                 state.upscale_results = {}
-                state.upscale_event.clear()
+                state.upscale_message_ids = {}
+                state.upscale_events = {i: asyncio.Event() for i in range(1, count + 1)}
+                state.upscale_complete_event.clear()
 
-    async def record_upscale_result(self, task_id: str, index: int, url: str) -> int:
+    async def record_upscale_result(self, task_id: str, index: int, url: str, message_id: str = "") -> int:
         """Record a single upscale result. Returns completed count."""
         async with self._lock:
             state = self._tasks.get(task_id)
             if not state:
                 return 0
             state.upscale_results[index] = url
+            if message_id:
+                state.upscale_message_ids[index] = message_id
+            if index in state.upscale_events:
+                state.upscale_events[index].set()
             state.progress = int(len(state.upscale_results) / state.expected_upscales * 100)
             done = len(state.upscale_results)
             if done >= state.expected_upscales:
@@ -147,7 +155,7 @@ class TaskTracker:
                 ]
                 state.completed_at = time.time()
                 state.complete_event.set()
-                state.upscale_event.set()
+                state.upscale_complete_event.set()
             return done
 
     async def set_complete(self, task_id: str, image_urls: list[str]) -> None:
@@ -158,7 +166,7 @@ class TaskTracker:
                 state.status = TaskStatus.COMPLETED
                 state.completed_at = time.time()
                 state.complete_event.set()
-                state.upscale_event.set()
+                state.upscale_complete_event.set()
 
     async def set_video_complete(self, task_id: str, video_url: str) -> None:
         async with self._lock:
@@ -169,7 +177,7 @@ class TaskTracker:
                 state.status = TaskStatus.COMPLETED
                 state.completed_at = time.time()
                 state.complete_event.set()
-                state.upscale_event.set()
+                state.upscale_complete_event.set()
 
     async def set_failed(self, task_id: str, error: str) -> None:
         async with self._lock:
@@ -180,7 +188,7 @@ class TaskTracker:
                 state.completed_at = time.time()
                 state.grid_event.set()
                 state.complete_event.set()
-                state.upscale_event.set()
+                state.upscale_complete_event.set()
 
     async def remove(self, task_id: str) -> None:
         async with self._lock:

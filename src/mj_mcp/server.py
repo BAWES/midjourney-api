@@ -133,7 +133,7 @@ async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
 
         # Wait for all upscales to complete
         try:
-            await asyncio.wait_for(current.upscale_event.wait(), timeout=UPSCALE_TIMEOUT)
+            await asyncio.wait_for(current.upscale_complete_event.wait(), timeout=UPSCALE_TIMEOUT)
         except asyncio.TimeoutError:
             # Log partial results — whatever we got is better than grid
             current = await tracker.get_task(state.id)
@@ -325,13 +325,48 @@ async def reroll(task_id: Annotated[str, "Task ID from imagine() or previous res
 
 
 @mcp.tool()
-async def animate(task_id: Annotated[str, "Task ID from imagine() result"]) -> dict:
+async def animate(
+    task_id: Annotated[str, "Task ID from imagine() or upscale() result"],
+    image_index: Annotated[int | None, "Which upscaled image to animate (1-4). Leave empty to use the grid's animate button if available."] = None,
+    motion: Annotated[str, "Motion level for animation"] = "low",
+) -> dict:
     """Animate a generated image to create a short video using Midjourney's image-to-video feature.
+
+    Animate buttons appear on upscaled individual images (not the grid).
+    If image_index is provided, uses the upscaled image's animate button.
+    Without image_index, falls back to the grid message or --animate flag.
     """
     state = await tracker.get_task(task_id)
     if not state:
         return {"error": f"Task {task_id} not found"}
 
+    # If image_index given, try the upscaled image's animate button
+    if image_index is not None:
+        msg_id = state.upscale_message_ids.get(image_index)
+        if msg_id:
+            # Try animate low/high, then generic animate
+            for suffix in [f"::low", f"::high", ""]:
+                cid = f"MJ::JOB::animate::{image_index}{suffix}"
+                # Check if this button exists by looking up from all_buttons
+                # Since we don't have the upscale result's buttons, try the interaction
+                status = await interaction.send_component_interaction(msg_id, cid)
+                if status in (200, 204):
+                    new_id = await tracker.create_task(
+                        f"animate img{image_index}: {state.prompt}",
+                        state.aspect_ratio,
+                    )
+                    tag = correlation.generate_tag()
+                    await tracker.set_correlation(new_id.id, tag)
+                    correlation.register(tag, new_id.id)
+                    try:
+                        await asyncio.wait_for(new_id.complete_event.wait(), timeout=GENERATION_TIMEOUT)
+                    except asyncio.TimeoutError:
+                        await tracker.set_failed(new_id.id, "Animation timed out")
+                    return await _task_result(new_id.id)
+
+        return {"error": f"No animate button found for image {image_index}"}
+
+    # Fallback: look for animate on grid message
     animate_cid = None
     for label, cid in state.all_buttons.items():
         if "animate" in label.lower() or "animate" in cid.lower() or "video" in cid.lower():
@@ -380,18 +415,14 @@ async def _on_grid_complete(
 async def _on_single_complete(
     correlation_tag: str, task_id: str, image_urls: list[str], message_id: str, **kwargs,
 ):
-    """Handle a single image result — could be an upscale or a direct complete."""
-    # Check if this task is in upscale phase
+    """Handle a single image result — could be an upscale or direct complete."""
     state = await tracker.get_task(task_id)
     if state and state.status.value == "upscaling":
-        # Try to derive which upscale index from the correlation context
-        # The upscale index isn't passed in the callback, so we auto-assign
-        # based on which slots are still empty
         url = image_urls[0] if image_urls else ""
         if url:
             for i in range(1, 5):
                 if i not in state.upscale_results:
-                    done = await tracker.record_upscale_result(task_id, i, url)
+                    await tracker.record_upscale_result(task_id, i, url, message_id)
                     return
     await tracker.set_complete(task_id, image_urls)
 
