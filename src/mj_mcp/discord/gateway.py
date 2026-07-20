@@ -44,6 +44,7 @@ class GatewayMonitor:
         self._on_grid_complete: Callable[..., Coroutine] | None = None
         self._on_single_complete: Callable[..., Coroutine] | None = None
         self._on_video_complete: Callable[..., Coroutine] | None = None
+        self._on_ready_cb: Callable[..., Coroutine] | None = None
 
         intents = discord.Intents.default()
         intents.message_content = True
@@ -59,11 +60,13 @@ class GatewayMonitor:
         on_grid_complete: Callable[..., Coroutine] | None = None,
         on_single_complete: Callable[..., Coroutine] | None = None,
         on_video_complete: Callable[..., Coroutine] | None = None,
+        on_ready: Callable[..., Coroutine] | None = None,
     ) -> None:
         self._on_progress = on_progress
         self._on_grid_complete = on_grid_complete
         self._on_single_complete = on_single_complete
         self._on_video_complete = on_video_complete
+        self._on_ready_cb = on_ready
 
     async def start(self) -> None:
         await self._client.start(self._bot_token)
@@ -157,5 +160,7 @@ class GatewayMonitor:
             self._client.user.name if self._client.user else "?",
             self._client.user.id if self._client.user else "?",
         )
+        if self._on_ready_cb:
+            await self._on_ready_cb()
 
     _on_ready.__name__ = "on_ready"

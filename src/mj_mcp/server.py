@@ -6,12 +6,13 @@ returns 4 individual HD images, not a raw grid.
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 import sys
 import time
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 # Load .env before anything else
 try:
@@ -80,7 +81,15 @@ correlation = CorrelationManager()
 tracker = TaskTracker()
 interaction: InteractionClient | None = None
 gateway: GatewayMonitor | None = None
-_semaphore: asyncio.Semaphore | None = None
+
+# Readiness: becomes True once gateway connects
+_ready: bool = False
+_ready_event: asyncio.Event = asyncio.Event()
+_start_time: float = time.time()
+
+# Dedup: prompt_hash -> task_id for in-flight imagine calls
+_in_flight: dict[str, str] = {}
+_in_flight_lock: asyncio.Lock = asyncio.Lock()
 
 # ---------------------------------------------------------------------------
 # MCP server
@@ -88,15 +97,47 @@ _semaphore: asyncio.Semaphore | None = None
 
 mcp = FastMCP("midjourney")
 
+# Health endpoint — no auth required
+from starlette.responses import JSONResponse as _JSONResponse
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_endpoint(request):
+    """Server health check. Excluded from auth."""
+    return _JSONResponse({
+        "status": "ok" if _ready else "warming",
+        "gateway_connected": _ready,
+        "uptime_seconds": int(time.time() - _start_time) if "_start_time" in dir() else 0,
+    })
+
 # ---- Tool helpers --------------------------------------------------------
 
 
 async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
-    """Send /imagine, wait for grid, auto-upscale U1-U4, return task id."""
+    """Send /imagine, wait for grid, auto-upscale U1-U4, return task id.
+
+    Deduplicates: if the same prompt is already in-flight, waits for that task.
+    """
     if not interaction:
         raise RuntimeError("Discord client not initialized")
 
+    # Dedup: check if this prompt is already being generated
+    prompt_key = hashlib.sha256(f"{prompt}|{aspect_ratio}".encode()).hexdigest()
+    async with _in_flight_lock:
+        existing_id = _in_flight.get(prompt_key)
+    if existing_id:
+        existing = await tracker.get_task(existing_id)
+        if existing and existing.status.value not in ("completed", "failed"):
+            logger.info("Dedup: joining existing task %s for prompt %s", existing_id, prompt[:40])
+            # Wait for existing task
+            try:
+                await asyncio.wait_for(existing.complete_event.wait(), timeout=GENERATION_TIMEOUT + UPSCALE_TIMEOUT)
+            except asyncio.TimeoutError:
+                pass
+            return existing_id
+
     state = await tracker.create_task(prompt, aspect_ratio)
+    async with _in_flight_lock:
+        _in_flight[prompt_key] = state.id
     tag = correlation.generate_tag()
     await tracker.set_correlation(state.id, tag)
     correlation.register(tag, state.id)
@@ -152,6 +193,11 @@ async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
                 await tracker.set_complete(state.id, urls)
             else:
                 await tracker.set_failed(state.id, "Upscale timed out with no results")
+
+    # Cleanup dedup entry
+    async with _in_flight_lock:
+        if _in_flight.get(prompt_key) == state.id:
+            _in_flight.pop(prompt_key, None)
 
     return state.id
 
@@ -447,6 +493,14 @@ async def _on_progress(correlation_tag: str, task_id: str, progress: int, **kwar
     await tracker.update_progress(task_id, progress)
 
 
+async def _on_gateway_ready():
+    """Called when the Discord gateway connects successfully."""
+    global _ready
+    _ready = True
+    _ready_event.set()
+    logger.info("MCP ready: gateway connected, accepting tool calls")
+
+
 # ---- Lifespan: start/stop Discord connections ----------------------------
 
 
@@ -476,6 +530,7 @@ async def start_backend():
             on_grid_complete=_on_grid_complete,
             on_single_complete=_on_single_complete,
             on_video_complete=_on_video_complete,
+            on_ready=_on_gateway_ready,
         )
 
         async def _run_gateway():
