@@ -18,7 +18,7 @@ class CorrelationManager:
         return f"mjr-{secrets.token_hex(8)}"
 
     def embed_in_prompt(self, prompt: str, tag: str) -> str:
-        return f"{prompt} {tag}"
+        return f"{tag} {prompt}"
 
     def extract_tag(self, text: str) -> str | None:
         match = TAG_PATTERN.search(text)
