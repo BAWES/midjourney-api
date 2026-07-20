@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Midjourney MCP Server — run with: python run.py"""
-import asyncio
 import sys
 from pathlib import Path
 
@@ -18,12 +17,6 @@ def main():
     import uvicorn
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.responses import JSONResponse
-
-    # Start Discord backend in a one-shot event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_backend())
-    loop.close()
 
     # Auth middleware
     class BearerAuthMiddleware(BaseHTTPMiddleware):
@@ -50,14 +43,17 @@ def main():
     app = mcp.streamable_http_app()
     app.add_middleware(BearerAuthMiddleware)
 
+    # Start backend inside uvicorn's own event loop via startup event
+    @app.on_event("startup")
+    async def _start():
+        await start_backend()
+
+    @app.on_event("shutdown")
+    async def _stop():
+        await stop_backend()
+
     print(f"[MJ-MCP] Starting on http://{HOST}:{PORT}")
-    try:
-        uvicorn.run(app, host=HOST, port=PORT, log_level="info")
-    finally:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(stop_backend())
-        loop.close()
+    uvicorn.run(app, host=HOST, port=PORT, log_level="info")
 
 
 if __name__ == "__main__":
