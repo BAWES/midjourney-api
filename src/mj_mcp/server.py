@@ -15,7 +15,7 @@ from pathlib import Path
 # Load .env before anything else
 try:
     from dotenv import load_dotenv
-    _env_path = Path(__file__).parent / ".env"
+    _env_path = Path(__file__).parent.parent.parent / ".env"
     if _env_path.exists():
         load_dotenv(_env_path, override=False)
         print(f"[MJ-MCP] Loaded .env from {_env_path}")
