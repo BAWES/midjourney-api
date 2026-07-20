@@ -51,6 +51,7 @@ class GatewayMonitor:
 
         self._client.event(self._on_message)
         self._client.event(self._on_message_edit)
+        self._client.event(self._on_ready)
 
     def set_callbacks(
         self,
@@ -78,12 +79,15 @@ class GatewayMonitor:
 
     async def _handle_message(self, message: discord.Message) -> None:
         if not self._should_process(message):
+            logger.debug("Skipping message from %s in channel %s (not MJ bot or wrong channel)",
+                         message.author.id, message.channel.id)
             return
 
         tag = self._correlation.extract_tag(message.content)
+        logger.info("MJ message from bot: tag=%s content=%.80s attachments=%d",
+                     tag, message.content, len(message.attachments) if message.attachments else 0)
         if not tag:
             return
-
         task_id = self._correlation.lookup(tag)
         if not task_id:
             logger.warning("Unknown correlation tag: %s", tag)
@@ -145,3 +149,13 @@ class GatewayMonitor:
         await self._handle_message(after)
 
     _on_message_edit.__name__ = "on_message_edit"
+
+    async def _on_ready(self) -> None:
+        """Called when discord.py connects successfully."""
+        logger.info(
+            "Gateway connected! Bot: %s (ID: %s)",
+            self._client.user.name if self._client.user else "?",
+            self._client.user.id if self._client.user else "?",
+        )
+
+    _on_ready.__name__ = "on_ready"

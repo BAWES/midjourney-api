@@ -467,8 +467,15 @@ async def start_backend():
             on_single_complete=_on_single_complete,
             on_video_complete=_on_video_complete,
         )
-        asyncio.create_task(gateway.start())
-        logger.info("Gateway monitor started")
+
+        async def _run_gateway():
+            try:
+                logger.info("Gateway connecting to Discord...")
+                await gateway.start()
+            except Exception as e:
+                logger.error("Gateway connection failed: %s", e, exc_info=True)
+
+        asyncio.create_task(_run_gateway())
     else:
         logger.warning("No DISCORD_BOT_TOKEN -- gateway disabled")
 
