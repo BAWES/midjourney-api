@@ -51,8 +51,9 @@ DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 DISCORD_USER_TOKEN = os.environ.get("DISCORD_USER_TOKEN", "")
 MJ_CHANNEL_ID = os.environ.get("MJ_CHANNEL_ID", "")
 MJ_MAX_CONCURRENT = int(os.environ.get("MJ_MAX_CONCURRENT_JOBS", "3"))
-GENERATION_TIMEOUT = int(os.environ.get("GENERATION_TIMEOUT_SECONDS", "180"))
-UPSCALE_TIMEOUT = int(os.environ.get("UPSCALE_TIMEOUT_SECONDS", "120"))
+GENERATION_TIMEOUT = int(os.environ.get("GENERATION_TIMEOUT_SECONDS", "45"))
+UPSCALE_TIMEOUT = int(os.environ.get("UPSCALE_TIMEOUT_SECONDS", "20"))
+TOTAL_TIMEOUT = int(os.environ.get("TOTAL_TIMEOUT_SECONDS", "55"))
 
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8005"))
@@ -174,8 +175,10 @@ async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
         await tracker.start_upscale_phase(state.id, count=4)
         asyncio.create_task(_fire_upscales(state.id))
 
-        # Poll for upscale results — gateway may lag or miss some events
-        deadline = time.time() + UPSCALE_TIMEOUT
+        # Poll for upscale results — respect total timeout (Universe = 60s)
+        elapsed = time.time() - state.created_at
+        remaining = max(10, TOTAL_TIMEOUT - elapsed)
+        deadline = time.time() + remaining
         while time.time() < deadline:
             await asyncio.sleep(3)
             current = await tracker.get_task(state.id)
