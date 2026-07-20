@@ -196,6 +196,12 @@ class TaskTracker:
             if state and state.correlation_tag:
                 self._correlation_to_task.pop(state.correlation_tag, None)
 
+    def get_most_recent_task_id(self) -> str | None:
+        """Return the task_id of the most recently created task."""
+        if not self._tasks:
+            return None
+        return max(self._tasks.values(), key=lambda s: s.created_at).id
+
     def to_result(self, state: TaskState) -> dict:
         """Serialize task state for tool response."""
         # Grid layout: [1] [2]

@@ -279,13 +279,18 @@ async def imagine(
 
 @mcp.tool()
 async def upscale(
-    task_id: Annotated[str, "Task ID from imagine() result"],
-    index: Annotated[int, "Which image to upscale (1-4)"],
+    index: Annotated[int, "Which image to upscale (1-4): 1=top-left, 2=top-right, 3=bottom-left, 4=bottom-right"],
+    task_id: Annotated[str | None, "Task ID from imagine(). If omitted, uses most recent."] = None,
 ) -> dict:
     """Manually upscale one image from a grid (usually not needed — imagine auto-upscales).
     """
     if index < 1 or index > 4:
         return {"error": "Index must be 1-4"}
+
+    if not task_id:
+        task_id = tracker.get_most_recent_task_id()
+        if not task_id:
+            return {"error": "No recent generation found"}
 
     state = await tracker.get_task(task_id)
     if not state:
@@ -307,11 +312,15 @@ async def upscale(
 
 @mcp.tool()
 async def vary(
-    task_id: Annotated[str, "Task ID from imagine() result"],
-    index: Annotated[int, "Which image to vary (1-4)"],
+    index: Annotated[int, "Which image to vary (1-4): 1=top-left, 2=top-right, 3=bottom-left, 4=bottom-right"],
+    task_id: Annotated[str | None, "Task ID from imagine(). If omitted, uses most recent."] = None,
 ) -> dict:
     """Generate variations of one image from a grid.
     """
+    if not task_id:
+        task_id = tracker.get_most_recent_task_id()
+        if not task_id:
+            return {"error": "No recent generation found"}
     if index < 1 or index > 4:
         return {"error": "Index must be 1-4"}
 
@@ -337,12 +346,16 @@ async def vary(
 
 
 @mcp.tool()
-async def reroll(task_id: Annotated[str, "Task ID from imagine() or previous result"]) -> dict:
+async def reroll(task_id: Annotated[str | None, "Task ID from imagine(). If omitted, uses most recent."] = None) -> dict:
     """Regenerate with the same prompt (reroll).
     """
+    if not task_id:
+        task_id = tracker.get_most_recent_task_id()
+        if not task_id:
+            return {"error": "No recent generation found"}
     state = await tracker.get_task(task_id)
     if not state:
-        return {"error": f"Task {task_id} not found"}
+        return {"error": "Task not found"}
 
     reroll_cid = "MJ::JOB::reroll::0::"
     for label, cid in state.all_buttons.items():
@@ -363,19 +376,25 @@ async def reroll(task_id: Annotated[str, "Task ID from imagine() or previous res
 
 @mcp.tool()
 async def animate(
-    task_id: Annotated[str, "Task ID from imagine() or upscale() result"],
-    image_index: Annotated[int | None, "Which upscaled image to animate (1-4). Leave empty to use the grid's animate button if available."] = None,
-    motion: Annotated[str, "Motion level for animation"] = "low",
+    task_id: Annotated[str | None, "Task ID from imagine(). If omitted, uses the most recent generation."] = None,
+    image_index: Annotated[int | None, "Which image to animate (1-4): 1=top-left, 2=top-right, 3=bottom-left, 4=bottom-right"] = None,
+    motion: Annotated[str, "Motion level: low or high"] = "low",
 ) -> dict:
-    """Animate a generated image to create a short video using Midjourney's image-to-video feature.
+    """Animate a generated image into a short video.
 
-    Animate buttons appear on upscaled individual images (not the grid).
-    If image_index is provided, uses the upscaled image's animate button.
-    Without image_index, falls back to the grid message or --animate flag.
+    Uses the most recent generation if task_id is omitted.
+    image_index selects which of the 4 images to animate (1-4 grid position).
     """
+    # If no task_id, use the most recent completed task
+    if not task_id:
+        task_id = tracker.get_most_recent_task_id()
+        if not task_id:
+            return {"error": "No recent generation found. Call imagine() first."}
+        logger.info("Animate: using most recent task %s", task_id[:8])
+
     state = await tracker.get_task(task_id)
     if not state:
-        return {"error": f"Task {task_id} not found"}
+        return {"error": f"Task not found"}
 
     # If image_index given, try the upscaled image's animate button
     if image_index is not None:
