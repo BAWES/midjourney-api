@@ -441,6 +441,7 @@ async def _on_grid_complete(
     message_id: str, upscale_buttons: dict, all_buttons: dict,
     has_animate: bool, **kwargs,
 ):
+    logger.info("Grid complete: task=%s buttons=%s msg=%s", task_id[:8], list(upscale_buttons.keys()), message_id)
     await tracker.set_grid_complete(
         task_id, image_url, message_id,
         upscale_buttons, all_buttons, has_animate,
@@ -457,8 +458,10 @@ async def _on_single_complete(
         if url:
             for i in range(1, 5):
                 if i not in state.upscale_results:
+                    logger.info("Upscale result: task=%s index=%d url=%.60s", task_id[:8], i, url)
                     await tracker.record_upscale_result(task_id, i, url, message_id)
                     return
+    logger.info("Single complete (non-upscale): task=%s urls=%d", task_id[:8], len(image_urls))
     await tracker.set_complete(task_id, image_urls)
 
 

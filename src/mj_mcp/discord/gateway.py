@@ -87,15 +87,23 @@ class GatewayMonitor:
 
         task_id = correlation.get_current()
         if not task_id:
+            logger.warning("MJ message received but no active task (content=%.80s)", message.content)
             return
 
         msg_id = str(message.id)
-
-        # Track this message as belonging to the current task
         correlation.track_message(msg_id, task_id)
 
-        # Check if it's an edit of a previously tracked message (progress/grid update)
-        is_edit = correlation.is_tracked(msg_id)
+        # Log every MJ bot message for debugging
+        has_grid = is_grid_completion(message)
+        has_video = is_video_result(message)
+        is_done = is_completed(message)
+        n_attachments = len(message.attachments) if message.attachments else 0
+        n_components = len(message.components) if message.components else 0
+        progress = extract_progress(message.content)
+        logger.info(
+            "MJ msg: task=%s attachments=%d components=%d grid=%s video=%s done=%s progress=%s",
+            task_id[:8], n_attachments, n_components, has_grid, has_video, is_done, progress,
+        )
 
         # 1. Video result
         if is_video_result(message) and self._on_video_complete:
