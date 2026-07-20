@@ -51,8 +51,8 @@ DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 DISCORD_USER_TOKEN = os.environ.get("DISCORD_USER_TOKEN", "")
 MJ_CHANNEL_ID = os.environ.get("MJ_CHANNEL_ID", "")
 MJ_MAX_CONCURRENT = int(os.environ.get("MJ_MAX_CONCURRENT_JOBS", "3"))
-GENERATION_TIMEOUT = int(os.environ.get("GENERATION_TIMEOUT_SECONDS", "45"))
-UPSCALE_TIMEOUT = int(os.environ.get("UPSCALE_TIMEOUT_SECONDS", "20"))
+GENERATION_TIMEOUT = int(os.environ.get("GENERATION_TIMEOUT_SECONDS", "40"))
+UPSCALE_TIMEOUT = int(os.environ.get("UPSCALE_TIMEOUT_SECONDS", "15"))
 TOTAL_TIMEOUT = int(os.environ.get("TOTAL_TIMEOUT_SECONDS", "55"))
 
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -266,35 +266,12 @@ async def imagine(
 ) -> dict:
     """Generate 4 HD images from a text prompt using Midjourney.
 
-    Auto-upscales: returns 4 individual HD image URLs, not a grid.
+    Returns grid overview + 4 individual HD image URLs.
+    Synchronous — blocks until ready (up to 55s).
     Use vary() for variations, animate() for video.
     """
     task_id = await _send_imagine(prompt, aspect_ratio)
     return await _task_result(task_id)
-
-
-# ---- Tool: wait ----------------------------------------------------------
-
-
-@mcp.tool()
-async def wait(task_id: Annotated[str, "Task ID from imagine() or other tool"]) -> dict:
-    """Wait for a task to complete and return latest status.
-    """
-    state = await tracker.get_task(task_id)
-    if not state:
-        return {"error": f"Task {task_id} not found"}
-
-    if state.status.value in ("completed", "failed"):
-        return tracker.to_result(state)
-
-    remaining = max(1, GENERATION_TIMEOUT - (time.time() - state.created_at))
-    try:
-        await asyncio.wait_for(state.complete_event.wait(), timeout=remaining)
-    except asyncio.TimeoutError:
-        pass
-
-    state = await tracker.get_task(task_id)
-    return tracker.to_result(state) if state else {"error": "Task not found"}
 
 
 # ---- Tool: upscale -------------------------------------------------------
