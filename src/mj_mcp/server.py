@@ -128,16 +128,26 @@ async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
     # Start upscale phase: click U1-U4 asynchronously
     if current.upscale_buttons:
         await tracker.start_upscale_phase(state.id, count=4)
-        # Fire upscale interactions in background
         asyncio.create_task(_fire_upscales(state.id))
 
-        # Wait for all upscales to complete
-        try:
-            await asyncio.wait_for(current.upscale_complete_event.wait(), timeout=UPSCALE_TIMEOUT)
-        except asyncio.TimeoutError:
-            # Log partial results — whatever we got is better than grid
+        # Poll for upscale results — gateway may lag or miss some events
+        deadline = time.time() + UPSCALE_TIMEOUT
+        while time.time() < deadline:
+            await asyncio.sleep(3)
             current = await tracker.get_task(state.id)
-            if current and current.upscale_results:
+            if not current:
+                break
+            if len(current.upscale_results) >= 4:
+                await tracker.set_complete(
+                    state.id,
+                    [current.upscale_results[i] for i in range(1, 5)],
+                )
+                break
+
+        # After timeout, return whatever we have
+        current = await tracker.get_task(state.id)
+        if current and current.status.value != "completed":
+            if current.upscale_results:
                 urls = [current.upscale_results.get(i, current.grid_url) for i in range(1, 5)]
                 await tracker.set_complete(state.id, urls)
             else:
