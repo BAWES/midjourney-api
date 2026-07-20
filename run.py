@@ -9,11 +9,13 @@ if str(_src) not in sys.path:
 
 from mj_mcp.server import (
     mcp, HOST, PORT, BEARER_TOKEN,
-    logger, start_backend, stop_backend,
+    logger, _ready, _start_time,
+    start_backend, stop_backend,
 )
 
 
 async def serve():
+    import time as t
     import uvicorn
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.responses import JSONResponse
@@ -38,10 +40,28 @@ async def serve():
                 return JSONResponse({"error": "Invalid token"}, status_code=403)
             return await call_next(request)
 
-    app = mcp.streamable_http_app()
-    app.add_middleware(BearerAuthMiddleware)
+    # Build MCP ASGI app
+    mcp_app = mcp.streamable_http_app()
+    mcp_app.add_middleware(BearerAuthMiddleware)
 
-    # Start backend (gateway + interaction) on the same event loop
+    # Mount everything under a single Starlette app with health endpoint
+    from starlette.applications import Starlette
+    from starlette.routing import Mount, Route
+
+    async def health_endpoint(request):
+        return JSONResponse({
+            "status": "ok" if _ready else "warming",
+            "gateway_connected": _ready,
+            "uptime_seconds": int(t.time() - _start_time),
+        })
+
+    app = Starlette(routes=[
+        Mount("/mcp", app=mcp_app),
+        Mount("/", app=mcp_app),
+        Route("/health", endpoint=health_endpoint, methods=["GET"]),
+    ])
+
+    # Start backend on the same event loop
     await start_backend()
 
     print(f"[MJ-MCP] Starting on http://{HOST}:{PORT}")
