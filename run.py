@@ -56,9 +56,8 @@ async def serve():
         })
 
     app = Starlette(routes=[
-        Mount("/mcp", app=mcp_app),
-        Mount("/", app=mcp_app),
         Route("/health", endpoint=health_endpoint, methods=["GET"]),
+        Mount("/", app=mcp_app),
     ])
 
     # Start backend on the same event loop
