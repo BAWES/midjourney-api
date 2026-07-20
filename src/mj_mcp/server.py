@@ -111,10 +111,9 @@ async def health_endpoint(request):
 
 
 async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
-    """Send /imagine, return task_id immediately. Processing continues in background.
+    """Send /imagine, wait for grid, auto-upscale U1-U4, return task id.
 
-    Deduplicates: if the same prompt is already in-flight, returns that task.
-    Use wait(task_id) to poll for results.
+    Deduplicates: if the same prompt is already in-flight, waits for that task.
     """
     if not interaction:
         raise RuntimeError("Discord client not initialized")
@@ -127,21 +126,28 @@ async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
         existing = await tracker.get_task(existing_id)
         if existing and existing.status.value not in ("completed", "failed"):
             logger.info("Dedup: joining existing task %s for prompt %s", existing_id, prompt[:40])
+            # Wait for existing task
+            try:
+                await asyncio.wait_for(existing.complete_event.wait(), timeout=GENERATION_TIMEOUT + UPSCALE_TIMEOUT)
+            except asyncio.TimeoutError:
+                pass
             return existing_id
 
     state = await tracker.create_task(prompt, aspect_ratio)
     async with _in_flight_lock:
         _in_flight[prompt_key] = state.id
 
-    # Rate limit
+    # Rate limit: minimum 3s between fresh imagine calls
     wait_time = mj_correl.check_rate_limit()
     if wait_time:
         logger.info("Rate limit: waiting %.1fs before next imagine", wait_time)
         await asyncio.sleep(wait_time)
     mj_correl.update_last_imagine_time()
+
+    # Set as current task for gateway message routing
     mj_correl.set_current(state.id)
 
-    # Send /imagine
+    # Send prompt as-is — no tags, no injection
     final_prompt = f"{prompt} --ar {aspect_ratio}" if aspect_ratio != "1:1" else prompt
     status = await interaction.send_imagine(final_prompt)
     if status not in (200, 204):
@@ -150,38 +156,25 @@ async def _send_imagine(prompt: str, aspect_ratio: str) -> str | None:
         status = await interaction.send_imagine(final_prompt)
         if status not in (200, 204):
             await tracker.set_failed(state.id, f"Discord returned HTTP {status}")
-            await _cleanup_dedup(state.id, prompt_key)
             return None
 
-    # Fire background processing (wait grid → upscale) — don't block
-    asyncio.create_task(_process_generation(state.id, prompt, prompt_key))
-
-    return state.id
-
-
-async def _process_generation(task_id: str, prompt: str, prompt_key: str) -> None:
-    """Background: wait for grid, auto-upscale U1-U4, clean up dedup."""
-    state = await tracker.get_task(task_id)
-    if not state:
-        return
-
-    # Wait for grid
+    # Wait for grid (4-image grid with U1-U4 buttons)
     try:
         await asyncio.wait_for(state.grid_event.wait(), timeout=GENERATION_TIMEOUT)
     except asyncio.TimeoutError:
         await tracker.set_failed(state.id, "Generation timed out")
-        await _cleanup_dedup(state.id, prompt_key)
-        return
 
+    # Check if grid arrived (if failed, don't try to upscale)
     current = await tracker.get_task(state.id)
     if not current or current.status.value == "failed":
-        await _cleanup_dedup(state.id, prompt_key)
-        return
+        return state.id
 
+    # Start upscale phase: click U1-U4 asynchronously
     if current.upscale_buttons:
         await tracker.start_upscale_phase(state.id, count=4)
         asyncio.create_task(_fire_upscales(state.id))
 
+        # Poll for upscale results — gateway may lag or miss some events
         deadline = time.time() + UPSCALE_TIMEOUT
         while time.time() < deadline:
             await asyncio.sleep(3)
@@ -195,6 +188,7 @@ async def _process_generation(task_id: str, prompt: str, prompt_key: str) -> Non
                 )
                 break
 
+        # After timeout, return whatever we have
         current = await tracker.get_task(state.id)
         if current and current.status.value != "completed":
             if current.upscale_results:
@@ -203,13 +197,12 @@ async def _process_generation(task_id: str, prompt: str, prompt_key: str) -> Non
             else:
                 await tracker.set_failed(state.id, "Upscale timed out with no results")
 
-    await _cleanup_dedup(state.id, prompt_key)
-
-
-async def _cleanup_dedup(task_id: str, prompt_key: str) -> None:
+    # Cleanup dedup entry
     async with _in_flight_lock:
-        if _in_flight.get(prompt_key) == task_id:
+        if _in_flight.get(prompt_key) == state.id:
             _in_flight.pop(prompt_key, None)
+
+    return state.id
 
 
 async def _fire_upscales(task_id: str) -> None:
@@ -270,9 +263,8 @@ async def imagine(
 ) -> dict:
     """Generate 4 HD images from a text prompt using Midjourney.
 
-    Returns immediately with a task_id. The generation runs in the background.
-    Auto-upscales to 4 individual HD images.
-    Call wait(task_id) to poll until complete and get image URLs.
+    Auto-upscales: returns 4 individual HD image URLs, not a grid.
+    Use vary() for variations, animate() for video.
     """
     task_id = await _send_imagine(prompt, aspect_ratio)
     return await _task_result(task_id)
@@ -282,11 +274,8 @@ async def imagine(
 
 
 @mcp.tool()
-async def wait(task_id: Annotated[str, "Task ID from imagine() — poll until generation completes and get HD image URLs"]) -> dict:
-    """Wait for a generation task to complete and return the results.
-
-    Use this after imagine() to get the final HD image URLs.
-    Returns immediately if already complete.
+async def wait(task_id: Annotated[str, "Task ID from imagine() or other tool"]) -> dict:
+    """Wait for a task to complete and return latest status.
     """
     state = await tracker.get_task(task_id)
     if not state:
