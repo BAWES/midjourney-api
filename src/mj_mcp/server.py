@@ -452,18 +452,6 @@ async def animate(
     return await _task_result(new_id)
 
 
-# ---- Tool: describe (note) -----------------------------------------------
-
-
-@mcp.tool()
-async def describe(image_url: Annotated[str, "Public URL of the image to analyze"]) -> dict:
-    """Analyze an image and generate text prompts that could recreate it.
-    """
-    return {
-        "note": "Midjourney /describe isn't supported via MCP yet (requires file upload to Discord). Use the Discord UI.",
-    }
-
-
 # ---- Callbacks: wire gateway events to tracker ---------------------------
 
 
