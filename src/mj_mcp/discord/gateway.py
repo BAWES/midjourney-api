@@ -128,13 +128,15 @@ class GatewayMonitor:
             )
             return
 
-        # 3. Single image completion
+        # 3. Single image completion (upscale results have their own buttons)
         if is_completed(message) and self._on_single_complete:
             urls = extract_all_image_urls(message)
+            buttons = extract_all_buttons(message)
             await self._on_single_complete(
                 task_id=task_id,
                 image_urls=urls,
                 message_id=str(message.id),
+                all_buttons=buttons,
             )
             return
 

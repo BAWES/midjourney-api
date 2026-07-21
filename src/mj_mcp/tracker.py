@@ -53,6 +53,7 @@ class TaskState:
     expected_upscales: int = 4
     upscale_results: dict[int, str] = field(default_factory=dict)  # index -> url
     upscale_message_ids: dict[int, str] = field(default_factory=dict)  # index -> message_id
+    upscale_result_buttons: dict[int, dict[str, str]] = field(default_factory=dict)  # index -> {label: custom_id}
     upscale_events: dict[int, asyncio.Event] = field(default_factory=dict)
     upscale_complete_event: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -134,7 +135,7 @@ class TaskTracker:
                 state.upscale_events = {i: asyncio.Event() for i in range(1, count + 1)}
                 state.upscale_complete_event.clear()
 
-    async def record_upscale_result(self, task_id: str, index: int, url: str, message_id: str = "") -> int:
+    async def record_upscale_result(self, task_id: str, index: int, url: str, message_id: str = "", buttons: dict[str, str] | None = None) -> int:
         """Record a single upscale result. Returns completed count."""
         async with self._lock:
             state = self._tasks.get(task_id)
@@ -143,6 +144,8 @@ class TaskTracker:
             state.upscale_results[index] = url
             if message_id:
                 state.upscale_message_ids[index] = message_id
+            if buttons:
+                state.upscale_result_buttons[index] = buttons
             if index in state.upscale_events:
                 state.upscale_events[index].set()
             state.progress = int(len(state.upscale_results) / state.expected_upscales * 100)

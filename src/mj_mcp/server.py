@@ -396,16 +396,24 @@ async def animate(
     if not state:
         return {"error": f"Task not found"}
 
-    # If image_index given, try the upscaled image's animate button
+    # If image_index given, look up the actual animate button from stored upscale buttons
     if image_index is not None:
         msg_id = state.upscale_message_ids.get(image_index)
-        if msg_id:
-            # Try animate low/high, then generic animate
-            for suffix in [f"::low", f"::high", ""]:
-                cid = f"MJ::JOB::animate::{image_index}{suffix}"
-                # Check if this button exists by looking up from all_buttons
-                # Since we don't have the upscale result's buttons, try the interaction
-                status = await interaction.send_component_interaction(msg_id, cid)
+        upscale_btns = state.upscale_result_buttons.get(image_index, {})
+        if msg_id and upscale_btns:
+            # Find the actual animate button by label
+            animate_cid = None
+            for label, cid in upscale_btns.items():
+                if "animate" in label.lower() or "video" in label.lower():
+                    # Prefer the motion level requested
+                    if motion.lower() in label.lower():
+                        animate_cid = cid
+                        break
+                    if not animate_cid:
+                        animate_cid = cid
+            if animate_cid:
+                logger.info("Animate: clicking button '%s' on msg %s", animate_cid[:40], msg_id)
+                status = await interaction.send_component_interaction(msg_id, animate_cid)
                 if status in (200, 204):
                     new_id = await tracker.create_task(
                         f"animate img{image_index}: {state.prompt}",
@@ -417,8 +425,12 @@ async def animate(
                     except asyncio.TimeoutError:
                         await tracker.set_failed(new_id.id, "Animation timed out")
                     return await _task_result(new_id.id)
-
-        return {"error": f"No animate button found for image {image_index}"}
+                else:
+                    return {"error": f"Animate interaction failed: HTTP {status}"}
+            else:
+                return {"error": f"No animate button found on image {image_index}. Available: {list(upscale_btns.keys())}"}
+        else:
+            return {"error": f"No tracked upscale message for image {image_index}"}
 
     # Fallback: look for animate on grid message
     animate_cid = None
@@ -472,7 +484,7 @@ async def _on_grid_complete(
 
 
 async def _on_single_complete(
-    task_id: str, image_urls: list[str], message_id: str, **kwargs,
+    task_id: str, image_urls: list[str], message_id: str, all_buttons: dict | None = None, **kwargs,
 ):
     """Handle a single image result — could be an upscale or direct complete."""
     state = await tracker.get_task(task_id)
@@ -481,8 +493,8 @@ async def _on_single_complete(
         if url:
             for i in range(1, 5):
                 if i not in state.upscale_results:
-                    logger.info("Upscale result: task=%s index=%d url=%.60s", task_id[:8], i, url)
-                    await tracker.record_upscale_result(task_id, i, url, message_id)
+                    logger.info("Upscale result: task=%s index=%d url=%.60s buttons=%s", task_id[:8], i, url, list(all_buttons.keys()) if all_buttons else [])
+                    await tracker.record_upscale_result(task_id, i, url, message_id, all_buttons)
                     return
     logger.info("Single complete (non-upscale): task=%s urls=%d", task_id[:8], len(image_urls))
     await tracker.set_complete(task_id, image_urls)
