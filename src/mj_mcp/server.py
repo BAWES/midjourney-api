@@ -445,9 +445,18 @@ async def animate(
                     )
                     mj_correl.set_current(new_id.id)
 
-                    # Wait for either grid (video grid with buttons) or direct completion (single video)
+                    # Wait for either grid (video grid) or complete (single WebP preview)
+                    # Whichever fires first
+                    grid_task = asyncio.create_task(new_id.grid_event.wait())
+                    complete_task = asyncio.create_task(new_id.complete_event.wait())
                     try:
-                        await asyncio.wait_for(new_id.grid_event.wait(), timeout=GENERATION_TIMEOUT)
+                        done, pending = await asyncio.wait(
+                            [grid_task, complete_task],
+                            return_when=asyncio.FIRST_COMPLETED,
+                            timeout=GENERATION_TIMEOUT,
+                        )
+                        for p in pending:
+                            p.cancel()
                     except asyncio.TimeoutError:
                         pass
 

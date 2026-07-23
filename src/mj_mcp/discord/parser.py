@@ -42,15 +42,28 @@ def extract_upscale_buttons(message: Any) -> dict[int, str]:
     """Extract U1-U4 button custom_ids from message components.
 
     Returns dict mapping upscale index (1-4) to custom_id string.
+    Matches by custom_id pattern OR by button label (U1-U4).
     """
     buttons: dict[int, str] = {}
+    LABEL_PATTERN = re.compile(r"^U([1-4])$", re.IGNORECASE)
     for row in getattr(message, "components", []):
         for child in getattr(row, "children", []):
             custom_id = getattr(child, "custom_id", None)
-            if custom_id:
-                match = UPSCALE_BUTTON_PATTERN.search(custom_id)
-                if match:
-                    buttons[int(match.group(1))] = custom_id
+            if not custom_id:
+                continue
+            # Match by custom_id pattern (image grids)
+            match = UPSCALE_BUTTON_PATTERN.search(custom_id)
+            if match:
+                buttons[int(match.group(1))] = custom_id
+                continue
+            # Match by label U1-U4 (video grids use different custom_id format)
+            label = getattr(child, "label", None)
+            if label:
+                label_match = LABEL_PATTERN.match(label.strip())
+                if label_match:
+                    idx = int(label_match.group(1))
+                    if idx not in buttons:
+                        buttons[idx] = custom_id
     return buttons
 
 
