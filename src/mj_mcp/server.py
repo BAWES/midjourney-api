@@ -459,21 +459,15 @@ async def animate(
                     if not current:
                         return {"error": "Animation task lost"}
 
-                    # If grid arrived (video grid with upscale buttons), return it
-                    # User picks which video to upscale via upscale(index, task_id)
+                    # Video grid arrived with U1-U4 buttons — return it
+                    # Bot shows grid, user picks, bot calls upscale(index, task_id) for MP4
                     if current.grid_url and current.upscale_buttons:
                         logger.info("Animate: video grid arrived, returning for user selection")
                         return tracker.to_result(current)
 
-                    # If a single video completed directly, return it
-                    if current.status.value == "completed":
-                        return tracker.to_result(current)
-
-                    # Still processing — check if complete_event fired
-                    if current.video_url or current.image_urls:
-                        return tracker.to_result(current)
-
-                    await tracker.set_failed(new_id.id, "Animation timed out")
+                    # Grid didn't arrive in time — don't return the static first frame
+                    # The user asked for animation, a static image is misleading
+                    await tracker.set_failed(new_id.id, "Animation still processing — the video grid didn't arrive in time. Try again.")
                     return tracker.to_result(current)
                 else:
                     return {"error": f"Animate interaction failed: HTTP {status}"}
