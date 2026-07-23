@@ -90,11 +90,25 @@ def is_single_image_completion(message: Any) -> bool:
 
 
 def is_video_result(message: Any) -> bool:
-    """Check if message contains a video result."""
+    """Check if message contains a video result.
+
+    Midjourney animate results may have video/* content_type,
+    or may arrive with no content_type but a .mp4/.webm URL in
+    the attachment filename or embed.  Check URL extension as
+    fallback.
+    """
     if not message.attachments:
         return False
+    VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".gif")
     for a in message.attachments:
+        # Primary check: content_type starts with video/
         if a.content_type and a.content_type.startswith("video/"):
+            return True
+        # Fallback: URL ends with video extension
+        if a.url and any(a.url.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
+            return True
+        # Fallback: filename ends with video extension
+        if a.filename and any(a.filename.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
             return True
     return False
 

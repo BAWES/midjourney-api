@@ -65,6 +65,7 @@ class TaskTracker:
         self._lock = asyncio.Lock()
         self._tasks: dict[str, TaskState] = {}
         self._correlation_to_task: dict[str, str] = {}
+        self._last_imagine_task_id: str | None = None  # tracks the latest imagine() task
 
     async def create_task(self, prompt: str, aspect_ratio: str) -> TaskState:
         task_id = str(uuid.uuid4())
@@ -198,6 +199,15 @@ class TaskTracker:
             state = self._tasks.pop(task_id, None)
             if state and state.correlation_tag:
                 self._correlation_to_task.pop(state.correlation_tag, None)
+
+    def set_last_imagine_task(self, task_id: str | None) -> None:
+        """Mark a task as the most recent imagine() call."""
+        if task_id:
+            self._last_imagine_task_id = task_id
+
+    def get_last_imagine_task_id(self) -> str | None:
+        """Return the task_id of the latest imagine() call."""
+        return self._last_imagine_task_id
 
     def get_most_recent_task_id(self) -> str | None:
         """Return the task_id of the most recently created task."""

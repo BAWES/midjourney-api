@@ -271,6 +271,7 @@ async def imagine(
     Use vary() for variations, animate() for video.
     """
     task_id = await _send_imagine(prompt, aspect_ratio)
+    tracker.set_last_imagine_task(task_id)
     return await _task_result(task_id)
 
 
@@ -400,6 +401,15 @@ async def animate(
     if image_index is not None:
         msg_id = state.upscale_message_ids.get(image_index)
         upscale_btns = state.upscale_result_buttons.get(image_index, {})
+        # If this task has no upscale data, try the last imagine task
+        if not msg_id and not upscale_btns:
+            imagine_id = tracker.get_last_imagine_task_id()
+            if imagine_id and imagine_id != task_id:
+                logger.info("Animate: falling back to imagine task %s for upscale data", imagine_id[:8])
+                imagine_state = await tracker.get_task(imagine_id)
+                if imagine_state:
+                    msg_id = imagine_state.upscale_message_ids.get(image_index)
+                    upscale_btns = imagine_state.upscale_result_buttons.get(image_index, {})
         if msg_id and upscale_btns:
             # Find the actual animate button by label
             animate_cid = None
