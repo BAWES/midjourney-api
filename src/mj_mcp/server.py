@@ -445,18 +445,13 @@ async def animate(
                     )
                     mj_correl.set_current(new_id.id)
 
-                    # Wait for either grid (video grid) or complete (single WebP preview)
-                    # Whichever fires first
-                    grid_task = asyncio.create_task(new_id.grid_event.wait())
-                    complete_task = asyncio.create_task(new_id.complete_event.wait())
+                    # Wait for the video grid (grid_event) — NOT complete_event.
+                    # MJ posts a static first frame first, then edits it with
+                    # faster GIFs, and finally stitches all 4 into a grid
+                    # with U1-U4 buttons. The first frame fires complete_event
+                    # but is just a static image — we want the final grid.
                     try:
-                        done, pending = await asyncio.wait(
-                            [grid_task, complete_task],
-                            return_when=asyncio.FIRST_COMPLETED,
-                            timeout=GENERATION_TIMEOUT,
-                        )
-                        for p in pending:
-                            p.cancel()
+                        await asyncio.wait_for(new_id.grid_event.wait(), timeout=GENERATION_TIMEOUT + 15)
                     except asyncio.TimeoutError:
                         pass
 
