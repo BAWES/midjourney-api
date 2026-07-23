@@ -281,13 +281,13 @@ async def imagine(
 @mcp.tool()
 async def upscale(
     index: Annotated[int, "Which image to upscale (1-4): 1=top-left, 2=top-right, 3=bottom-left, 4=bottom-right"],
-    task_id: Annotated[str | None, "Task ID from imagine(). If omitted, uses most recent."] = None,
+    task_id: Annotated[str | None, "Task ID from imagine() or animate(). If omitted, uses most recent."] = None,
 ) -> dict:
-    """Manually upscale one image from a grid (usually not needed — imagine auto-upscales).
-    """
-    if index < 1 or index > 4:
-        return {"error": "Index must be 1-4"}
+    """Upscale one image from a grid, or upscale a video from an animate preview.
 
+    For image grids: index selects which of the 4 images to upscale.
+    For animate results: index is ignored — the Upscale button produces the final video.
+    """
     if not task_id:
         task_id = tracker.get_most_recent_task_id()
         if not task_id:
@@ -295,14 +295,26 @@ async def upscale(
 
     state = await tracker.get_task(task_id)
     if not state:
-        return {"error": f"Task {task_id} not found"}
-    if not state.message_id or index not in state.upscale_buttons:
-        return {"error": f"No upscale button for index {index}"}
+        return {"error": "Task not found"}
+    if not state.message_id:
+        return {"error": "No message to upscale from"}
+
+    # Image grid: use U1-U4 button from upscale_buttons
+    if index in state.upscale_buttons:
+        custom_id = state.upscale_buttons[index]
+    else:
+        # Animate result or other: find Upscale button from all_buttons
+        custom_id = None
+        for label, cid in state.all_buttons.items():
+            if "upscale" in label.lower():
+                custom_id = cid
+                break
+        if not custom_id:
+            return {"error": f"No upscale button found. Available: {list(state.all_buttons.keys())}"}
 
     new_id = await _click_and_wait(
-        state.message_id,
-        state.upscale_buttons[index],
-        f"upscale {index}: {state.prompt}",
+        state.message_id, custom_id,
+        f"upscale: {state.prompt}",
         state.aspect_ratio,
     )
     return await _task_result(new_id)
@@ -508,7 +520,7 @@ async def _on_grid_complete(
 async def _on_single_complete(
     task_id: str, image_urls: list[str], message_id: str, all_buttons: dict | None = None, **kwargs,
 ):
-    """Handle a single image result — could be an upscale or direct complete."""
+    """Handle a single image result — could be an upscale, animate preview, or direct complete."""
     state = await tracker.get_task(task_id)
     if state and state.status.value in ("upscaling", "grid_complete"):
         url = image_urls[0] if image_urls else ""
@@ -518,7 +530,11 @@ async def _on_single_complete(
                     logger.info("Upscale result: task=%s index=%d url=%.60s buttons=%s", task_id[:8], i, url, list(all_buttons.keys()) if all_buttons else [])
                     await tracker.record_upscale_result(task_id, i, url, message_id, all_buttons)
                     return
-    logger.info("Single complete (non-upscale): task=%s urls=%d", task_id[:8], len(image_urls))
+    # Non-upscale completion (e.g., animate preview WebP) — store message_id and buttons
+    # so the user can upscale/interact with this result later
+    logger.info("Single complete: task=%s urls=%d buttons=%s", task_id[:8], len(image_urls), list(all_buttons.keys()) if all_buttons else [])
+    if all_buttons:
+        await tracker.store_result_buttons(task_id, message_id, all_buttons)
     await tracker.set_complete(task_id, image_urls)
 
 

@@ -200,6 +200,14 @@ class TaskTracker:
             if state and state.correlation_tag:
                 self._correlation_to_task.pop(state.correlation_tag, None)
 
+    async def store_result_buttons(self, task_id: str, message_id: str, all_buttons: dict[str, str]) -> None:
+        """Store message_id and buttons on a completed task so follow-up tools work."""
+        async with self._lock:
+            state = self._tasks.get(task_id)
+            if state:
+                state.message_id = message_id
+                state.all_buttons = all_buttons
+
     def set_last_imagine_task(self, task_id: str | None) -> None:
         """Mark a task as the most recent imagine() call."""
         if task_id:
