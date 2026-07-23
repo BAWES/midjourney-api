@@ -383,8 +383,10 @@ async def animate(
 ) -> dict:
     """Animate a generated image into a short video.
 
+    Returns a video grid (4 variations) — the user picks which one to keep.
+    After getting the grid, call upscale(index, task_id) to get the final video.
     Uses the most recent generation if task_id is omitted.
-    image_index selects which of the 4 images to animate (1-4 grid position).
+    image_index selects which image to animate (1-4 grid position).
     """
     # If no task_id, use the most recent completed task
     if not task_id:
@@ -430,11 +432,33 @@ async def animate(
                         state.aspect_ratio,
                     )
                     mj_correl.set_current(new_id.id)
+
+                    # Wait for either grid (video grid with buttons) or direct completion (single video)
                     try:
-                        await asyncio.wait_for(new_id.complete_event.wait(), timeout=GENERATION_TIMEOUT)
+                        await asyncio.wait_for(new_id.grid_event.wait(), timeout=GENERATION_TIMEOUT)
                     except asyncio.TimeoutError:
-                        await tracker.set_failed(new_id.id, "Animation timed out")
-                    return await _task_result(new_id.id)
+                        pass
+
+                    current = await tracker.get_task(new_id.id)
+                    if not current:
+                        return {"error": "Animation task lost"}
+
+                    # If grid arrived (video grid with upscale buttons), return it
+                    # User picks which video to upscale via upscale(index, task_id)
+                    if current.grid_url and current.upscale_buttons:
+                        logger.info("Animate: video grid arrived, returning for user selection")
+                        return tracker.to_result(current)
+
+                    # If a single video completed directly, return it
+                    if current.status.value == "completed":
+                        return tracker.to_result(current)
+
+                    # Still processing — check if complete_event fired
+                    if current.video_url or current.image_urls:
+                        return tracker.to_result(current)
+
+                    await tracker.set_failed(new_id.id, "Animation timed out")
+                    return tracker.to_result(current)
                 else:
                     return {"error": f"Animate interaction failed: HTTP {status}"}
             else:
